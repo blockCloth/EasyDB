@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="./css/xterm.css" />
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        #terminal {
+            flex: 1;
+            width: 100%;
+        }
+        #footer {
+            background-color: #f1f1f1;
+            text-align: center;
+            padding: 10px 0;
+            font-size: 14px;
+        }
+        .xterm-cursor-bar {
+            width: 2px !important; /* 调整光标宽度 */
+        }
+    </style>
+</head>
+<body>
+<div id="terminal"></div>
+<div id="footer">
+    备案号：<a href="https://beian.miit.gov.cn" target="_blank">赣ICP备2024025197号</a>
+</div>
+<script src="./js/xterm.js"></script>
+<script src="./js/xterm-addon-fit.js"></script>
+<script>
+    document.addEventListener("DOMContentLoaded", () => {
+        const term = new Terminal({
+            fontSize: 17, // 设置字体大小，例如17px
+            lineHeight: 1.5, // 设置行高，例如1.5倍行高
+            cursorBlink: true, // 光标闪烁
+            cursorStyle: "bar", // 光标样式
+            macOptionIsMeta: true, // Mac Option 键作为 Meta 键
+            scrollback: 10000, // 滚动缓冲区大小
+        });
+        const fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+        term.open(document.getElementById("terminal"));
+        fitAddon.fit();
+
+        const socket = new WebSocket("ws://localhost:8081/terminal");
+        let commandBuffer = "";
+        let cursorPosition = 0;
+        const prompt = "simpledb> ";
+
+        // Function to display the prompt
+        const displayPrompt = () => {
+            term.write(prompt);
+        };
+
+        const renderCommandBuffer = () => {
+            term.write('\x1b[2K\r'); // Clear the current line
+            term.write(prompt + commandBuffer); // Re-write the prompt and buffer
+            term.write(`\x1b[${prompt.length + cursorPosition + 1}G`); // Move cursor to correct position
+        };
+
+        socket.onopen = () => {
+            console.log("WebSocket connection established");
+        };
+
+        socket.onerror = (error) => {
+            console.error("WebSocket error:", error);
+        };
+
+        socket.onclose = (event) => {
+            console.log("WebSocket connection closed:", event);
+        };
+
+        socket.onmessage = function (event) {
+            try {
+                console.log("Message from server:", event.data);
+                const message = JSON.parse(event.data);
+                if (message.type === "error") {
+                    term.write("\x1b[31m" + message.data + "\x1b[0m\r\n"); // red text for errors
+                } else if (message.type === "info") {
+                    term.write(
+                        "\x1b[32m" + message.data.replace(/\n/g, "\r\n") + "\x1b[0m\r\n"
+                    ); // green text for info
+                } else {
+                    term.write(message.data.replace(/\n/g, "\r\n") + "\r\n");
+                }
+                displayPrompt(); // Display the prompt after the output
+            } catch (e) {
+                console.error("Failed to parse message from server:", e, event.data);
+                term.write("\x1b[31mFailed to parse message from server.\x1b[0m\r\n");
+            }
+        };
+
+        // Function to execute custom commands
+        const executeCustomCommand = (command) => {
+            switch (command.toLowerCase()) {
+                case "clear":
+                    term.clear();
+                    displayPrompt();
+                    break;
+                case "help":
+                    term.write("Available commands:\r\n");
+                    term.write(" - init: 初始化数据库，必须执行！\r\n");
+                    term.write(" - clear: 清除终端页面\r\n");
+                    term.write(" - 支持数据类型：\r\n");
+                    term.write("    - int、long、double、string、varchar\r\n");
+                    term.write(" - 命令示例：\r\n");
+                    term.write("  -- 基本操作\r\n");
+                    term.write(
+                        "    (1) create table emp id int, name varchar (index id)\r\n"
+                    );
+                    term.write("    (2) insertObj into emp values 10 \"zhangsan\"\r\n");
+                    term.write("    (3) selectObj * from emp where id=10\r\n");
+                    term.write("    (4) deleteObj from emp where id=10\r\n");
+                    term.write("  -- 事务操作\r\n");
+                    term.write("    (1) begin\r\n");
+                    term.write("    (2) insertObj into emp values 20 \"lisi\"\r\n");
+                    term.write("    (3) selectObj * from emp where id=20\r\n");
+                    term.write("    (4) commit\r\n");
+                    term.write("若出现使用问题，可尝试刷新页面，本项目只是个体验项目，不保证数据持久化！\r\n");
+                    displayPrompt();
+                    break;
+                default:
+                    term.write(`\r\nUnknown command: ${command}`);
+                    displayPrompt();
+            }
+        };
+
+        const sanitizeInput = (input) => {
+            return input.replace(/[\x00-\x1F\x7F-\x9F]/g, ""); // 移除所有控制字符
+        };
+
+        term.onKey((e) => {
+            const char = e.key;
+            const printable = isPrintableKey(char.charCodeAt(0));
+
+            if (char === "\u000D") { // Enter key
+                if (commandBuffer.trim().length > 0) {
+                    const sanitizedCommand = sanitizeInput(commandBuffer);
+                    console.log(`Sending command: ${sanitizedCommand}`);
+                    term.write("\r\n"); // Move to the next line before processing the command
+
+                    if (["clear", "help"].includes(sanitizedCommand.split(" ")[0].toLowerCase())) {
+                        executeCustomCommand(sanitizedCommand);
+                    } else {
+                        socket.send(sanitizedCommand);
+                    }
+
+                    commandBuffer = ""; // Clear the command buffer
+                    cursorPosition = 0;
+                } else {
+                    term.write("\r\n"); // Move to the next line if no command was entered
+                    displayPrompt(); // Always display prompt after pressing Enter
+                }
+            } else if (char === "\u007F") { // Backspace key
+                if (cursorPosition > 0 && commandBuffer.length > 0) {
+                    commandBuffer = commandBuffer.slice(0, cursorPosition - 1) + commandBuffer.slice(cursorPosition);
+                    cursorPosition--;
+                    renderCommandBuffer(); // Re-render command buffer
+                }
+            } else if (e.domEvent.key === "ArrowLeft") { // Left arrow key
+                if (cursorPosition > 0) {
+                    cursorPosition--;
+                    renderCommandBuffer(); // Re-render command buffer
+                }
+            } else if (e.domEvent.key === "ArrowRight") { // Right arrow key
+                if (cursorPosition < commandBuffer.length) {
+                    cursorPosition++;
+                    renderCommandBuffer(); // Re-render command buffer
+                }
+            } else if (e.domEvent.ctrlKey && e.domEvent.key === "v") { // Ctrl+V
+                navigator.clipboard.readText().then((text) => {
+                    commandBuffer = commandBuffer.slice(0, cursorPosition) + text + commandBuffer.slice(cursorPosition);
+                    cursorPosition += text.length;
+                    renderCommandBuffer(); // Re-render command buffer
+                });
+                e.preventDefault(); // Prevent the default paste behavior
+            } else if (e.domEvent.ctrlKey && e.domEvent.key === "c") { // Ctrl+C
+                const selectedText = term.getSelection();
+                navigator.clipboard.writeText(selectedText);
+                e.preventDefault(); // Prevent the default copy behavior
+            } else if (printable) {
+                commandBuffer = commandBuffer.slice(0, cursorPosition) + char + commandBuffer.slice(cursorPosition);
+                cursorPosition++;
+                renderCommandBuffer(); // Re-render command buffer
+            }
+        });
+
+        term.write(
+            'Welcome to the SQL terminal. Please initialize the database with the "init" command.\r\n' +
+            'Type "help" to see the list of available commands.\r\n' +
+            '使用之前请先执行 "init" 命令初始化数据库，输入“help”查看可用命令的列表。\r\n' +
+            '若出现使用问题，可尝试刷新页面，本项目只是个体验项目，不保证数据持久化！\r\n'
+        );
+        displayPrompt();
+
+        // Disable pasting via context menu
+        term.element.addEventListener("contextmenu", (e) => {
+            e.preventDefault();
+        });
+    });
+
+    const isPrintableKey = (key) => {
+        const printable =
+            (key >= 0x20 && key <= 0x7E) || // Printable ASCII
+            (key >= 0xA0 && key <= 0xFF); // Printable Latin-1
+        return printable;
+    };
+</script>
+</body>
+</html>

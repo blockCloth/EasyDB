@@ -1,0 +1,7 @@
+spring:
+  config:
+    import: application-dev.yml
+  application:
+    name: simple-sql-database
+server:
+  port: 8081
