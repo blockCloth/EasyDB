@@ -79,7 +79,7 @@ public class Types {
 
             @Override
             public Object getDefaultValue() {
-                return "";
+                return "NULL";
             }
         },
         DATE("date") {
@@ -223,7 +223,7 @@ public class Types {
 
             @Override
             public Object getDefaultValue() {
-                return "";
+                return "NULL";
             }
         },
         DOUBLE("double") {

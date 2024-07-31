@@ -1,7 +1,10 @@
 package com.dyx.simpledb.backend.tbm;
 
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import com.dyx.simpledb.backend.utils.Types;
 import com.dyx.simpledb.common.DatabaseState;
@@ -29,6 +32,15 @@ public class Field {
     private long index;
     private BPlusTree bt;
     Object defaultValue;
+    boolean isAutoIncrement;
+    //增加非空约束
+    boolean isNotNull;
+    // 定义主键自增行为
+    AtomicInteger atomicInteger = new AtomicInteger(0);
+    // 唯一约束
+    boolean isUnique;
+    //定义一个集合，存储元素
+    Set<Object> uniqueValues;
 
     public static Field loadField(Table tb, long uid) {
         byte[] raw = null;
@@ -46,12 +58,19 @@ public class Field {
         this.tb = tb;
     }
 
-    public Field(Table tb, String fieldName, String fieldType, long index) {
+    public Field(Table tb, String fieldName, String fieldType, long index,
+                 boolean isAutoIncrement,boolean isNotNull,boolean isUnique) {
         this.tb = tb;
         this.fieldName = fieldName;
         this.fieldType = fieldType;
         this.index = index;
         this.defaultValue = getDefaultValue(fieldType);
+        this.isAutoIncrement = isAutoIncrement;
+        this.isNotNull = isNotNull;
+        this.isUnique = isUnique;
+        if (isUnique){
+            uniqueValues = new HashSet<>();
+        }
     }
 
     private Object getDefaultValue(String fieldType){
@@ -78,9 +97,22 @@ public class Field {
         return this;
     }
 
-    public static Field createField(Table tb, long xid, String fieldName, String fieldType, boolean indexed) throws Exception {
+    /**
+     * 创建字段信息
+     * @param tb 表
+     * @param xid 事务ID
+     * @param fieldName 字段名
+     * @param fieldType 字段类型
+     * @param indexed 是否为索引
+     * @param isAutoIncrement 是否自增
+     * @param isNotNull 非空约束
+     * @param isUnique 唯一约束
+     */
+    public static Field createField(Table tb, long xid, String fieldName,
+                                    String fieldType, boolean indexed,
+                                    boolean isAutoIncrement,boolean isNotNull,boolean isUnique) throws Exception {
         typeCheck(fieldType);
-        Field f = new Field(tb, fieldName, fieldType, 0);
+        Field f = new Field(tb, fieldName, fieldType, 0,isAutoIncrement,isNotNull,isUnique);
         if(indexed) {
             long index = BPlusTree.create(((TableManagerImpl)tb.tbm).dm);
             BPlusTree bt = BPlusTree.load(index, ((TableManagerImpl)tb.tbm).dm);
@@ -147,6 +179,10 @@ public class Field {
             // 如果枚举中不存在该类型，返回 null 或者其他默认值
             return null;
         }
+    }
+
+    public boolean valueExists(Object v) {
+        return uniqueValues.contains(v);
     }
 
     class ParseValueRes {

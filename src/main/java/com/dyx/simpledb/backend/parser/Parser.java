@@ -177,10 +177,28 @@ public class Parser {
         List<String> fieldNames = new ArrayList<>();
         List<String> fieldTypes = new ArrayList<>();
         List<String> indexes = new ArrayList<>();
+        List<String> autoIncrement = new ArrayList<>();
+        List<String> notNull = new ArrayList<>();
+        List<String> unique = new ArrayList<>();
+
 
         for (ColumnDefinition columnDefinition : createTable.getColumnDefinitions()) {
             fieldNames.add(columnDefinition.getColumnName());
             fieldTypes.add(columnDefinition.getColDataType().toString());
+
+            if (columnDefinition.getColumnSpecs() != null) {
+                for (String columnSpec : columnDefinition.getColumnSpecs()) {
+                    if (columnSpec.equalsIgnoreCase("PRIMARY")) {
+                        create.primaryKey = columnDefinition.getColumnName();
+                    } else if (columnSpec.equalsIgnoreCase("AUTO_INCREMENT")) {
+                        autoIncrement.add(columnDefinition.getColumnName());
+                    } else if (columnSpec.equalsIgnoreCase("NOT")) {
+                        notNull.add(columnDefinition.getColumnName());
+                    }else if (columnSpec.equalsIgnoreCase("UNIQUE")) {
+                        unique.add(columnDefinition.getColumnName());
+                    }
+                }
+            }
         }
 
         if (createTable.getIndexes() != null) {
@@ -195,6 +213,9 @@ public class Parser {
         create.fieldName = fieldNames.toArray(new String[0]);
         create.fieldType = fieldTypes.toArray(new String[0]);
         create.index = indexes.toArray(new String[0]);
+        create.autoIncrement = autoIncrement.toArray(new String[0]);
+        create.notNull = notNull.toArray(new String[0]);
+        create.unique = unique.toArray(new String[0]);
 
         return create;
     }
