@@ -1,10 +1,10 @@
 package com.dyx.simpledb.backend.tbm;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 import cn.hutool.core.util.StrUtil;
 import com.dyx.simpledb.backend.parser.statement.*;
+import com.dyx.simpledb.backend.utils.Types;
 import com.google.common.primitives.Bytes;
 
 import com.dyx.simpledb.backend.parser.statement.DeleteObj;
@@ -31,7 +31,10 @@ public class Table {
     public static final String GEN_CLUST_INDEX = "GEN_CLUST_INDEX";
     // 存储需要自增的字段
     static Set<String> autoIncrementFields = new HashSet<>();
-    static Set<Long> fullScanUid = new HashSet<>();
+    static Set<Long> uidSet = new HashSet<>();
+    private Map<Long, byte[]> dataStore = new HashMap<>(); // 存储数据的映射，假设数据以 byte[] 形式存储
+    //定义一个字段缓存，用于全表查询
+    private Map<String,Field> fieldCache = new HashMap<>();
 
     public static Table loadTable(TableManager tbm, long uid) {
         byte[] raw = null;
@@ -132,19 +135,20 @@ public class Table {
     }
 
     public int delete(long xid, DeleteObj deleteObj) throws Exception {
-        List<Long> uids = parseWhere(deleteObj.where);
+        List<Long> uids = parseWhere(deleteObj.where,xid);
         int count = 0;
         for (Long uid : uids) {
             if (((TableManagerImpl) tbm).vm.delete(xid, uid)) {
                 count++;
-                fullScanUid.remove(uid);
+                uidSet.remove(uid);
+                dataStore.remove(uid);
             }
         }
         return count;
     }
 
     public int update(long xid, UpdateObj updateObj) throws Exception {
-        List<Long> uids = parseWhere(updateObj.where);
+        List<Long> uids = parseWhere(updateObj.where,xid);
         Field fd = null;
         for (Field f : fields) {
             if (f.fieldName.equals(updateObj.fieldName)) {
@@ -168,13 +172,14 @@ public class Table {
             raw = entry2Raw(entry);
             long uuid = ((TableManagerImpl) tbm).vm.insert(xid, raw);
 
+            dataStore.put(uuid, raw); // 更新 dataStore
+            uidSet.remove(uid);
+            uidSet.add(uuid);
             count++;
 
             for (Field field : fields) {
                 if (field.isIndexed()) {
                     field.insert(entry.get(field.fieldName), uuid);
-                    fullScanUid.remove(uid);
-                    fullScanUid.add(uuid);
                 }
             }
         }
@@ -182,7 +187,7 @@ public class Table {
     }
 
     public String read(long xid, SelectObj read) throws Exception {
-        List<Long> uids = parseWhere(read.where);
+        List<Long> uids = parseWhere(read.where,xid);
         StringBuilder sb = new StringBuilder();
         for (Long uid : uids) {
             byte[] raw = ((TableManagerImpl) tbm).vm.read(xid, uid);
@@ -197,7 +202,9 @@ public class Table {
         Map<String, Object> entry = string2Entry(insertObj);
         byte[] raw = entry2Raw(entry);
         long uid = ((TableManagerImpl) tbm).vm.insert(xid, raw);
-        fullScanUid.add(uid);
+        dataStore.put(uid,raw);
+        uidSet.add(uid);
+
         for (Field field : fields) {
             if (field.isIndexed()) {
                 field.insert(entry.get(field.fieldName), uid);
@@ -288,51 +295,163 @@ public class Table {
         return entry;
     }
 
-    private List<Long> parseWhere(Where where) throws Exception {
+    private List<Long> parseWhere(Where where,long xid) throws Exception {
         // 初始化搜索范围和标志位
         long l0 = 0, r0 = 0, l1 = 0, r1 = 0;
         boolean single = false;
-        Field fd = null;
+        Field fieldIndex1 = null;
+        Field fieldIndex2 = null;
 
-        // 如果 WHERE 子句为空，则搜索所有记录
+        // 如果 WHERE 子句为空，则执行全表扫描
         if (where == null) {
-            return new ArrayList<>(fullScanUid);
-        } else {
-            // 如果 WHERE 子句不为空，则根据 WHERE 子句解析搜索范围
-            // 寻找 WHERE 子句中涉及的字段
-            for (Field field : fields) {
-                if (field.fieldName.equals(where.singleExp1.field)) {
-                    // 如果字段没有索引，则抛出异常,还需要改进，若没有索引则
-                    if (!field.isIndexed()) {
-                        throw Error.FieldNotIndexedException;
-                    }
-                    fd = field;
+            // 返回所有记录的 UID
+            return getAllUid();
+        }
+
+        // 查找与 WHERE 子句条件匹配的字段
+        for (Field field : fields) {
+            if (field.fieldName.equals(where.singleExp1.field) && field.isIndexed()) {
+                fieldIndex1 = field;
+            }else if (field.fieldName.equals(where.singleExp1.field) && field.isIndexed()){
+                fieldIndex2 = field;
+            }
+        }
+
+        //选择最合适的索引字段
+        Field selectIndex = selectBestIndexed(fieldIndex1,fieldIndex2);
+
+        // 如果没有找到有索引的字段或 WHERE 子句中的字段没有索引
+        if (fieldIndex1 == null) {
+            // 执行全表扫描
+            return performFullTableScanWithCondition(where,xid);
+        }
+
+        // 计算 WHERE 子句的搜索范围
+        CalWhereRes res = calWhere(fieldIndex1, where);
+        l0 = res.l0;
+        r0 = res.r0;
+        l1 = res.l1;
+        r1 = res.r1;
+        single = res.single;
+
+        // 使用索引字段进行搜索
+        List<Long> uids = fieldIndex1.search(l0, r0);
+
+        // 如果 WHERE 子句包含 OR 运算符，需要处理两个范围
+        if (!single) {
+            List<Long> tmp = fieldIndex1.search(l1, r1);
+            uids.addAll(tmp);
+        }
+
+        return uids;
+    }
+
+    // 选择最好的索引字段，默认情况下为index1
+    private Field selectBestIndexed(Field fieldIndex1, Field fieldIndex2) {
+        // if (fieldIndex1 == null) return fieldIndex2;
+        // if ()
+    }
+
+    private List<Long> getAllUid() throws Exception {
+        Field fd = null;
+        for (Field field : fields) {
+            if (field.isIndexed()){
+                fd = field;
+                break;
+            }
+        }
+        return fd.search(0,Integer.MAX_VALUE);
+    }
+
+    private List<Long> performFullTableScanWithCondition(Where where,long xid) throws Exception {
+        List<Long> uids = new ArrayList<>();
+        for (Long uid : getAllUid()) {
+            byte[] data = ((TableManagerImpl)tbm).vm.read(xid,uid);
+            if (data == null) continue;
+
+            Map<String, Object> record = parseEntry(data);
+
+            if (satisfiesCondition(record, where)) {
+                uids.add(uid);
+            }
+        }
+        return uids;
+    }
+
+    private boolean satisfiesCondition(Map<String, Object> record, Where where) throws Exception {
+        // 先初始化处理singleExp1
+        boolean result1 = checkSingleCondition(record, where.singleExp1);
+        if (where.singleExp2 == null){
+            return result1;
+        }
+
+        //再次处理singleExp2的结果
+        boolean result2 = checkSingleCondition(record,where.singleExp2);
+
+        switch (where.logicOp){
+            case "and":
+                return result1 && result2;
+            case "or":
+                return result1 || result2;
+            default:
+                throw new IllegalArgumentException("Unsupported logical operation: " + where.logicOp);
+        }
+    }
+
+    private boolean checkSingleCondition(Map<String, Object> record, SingleExpression singleExp) throws Exception {
+        // 从记录中获取字段值
+        Object valueInRecord = record.get(singleExp.field);
+        if (valueInRecord == null) return false; // 记录中没有对应的字段
+
+        // 使用 string2Value 将条件的字符串值转换为适当的对象类型
+        Object conditionValue = string2Value(singleExp.value,singleExp.field);
+
+        // 如果转换后的值为空，说明类型不匹配或字段不存在，返回 false
+        if (conditionValue == null) return false;
+
+        // 执行比较操作,将 valueInRecord 强制转换为 Comparable<Object>，以便后续可以调用 compareTo 方法进行比较
+        @SuppressWarnings("unchecked")
+        Comparable<Object> comparableValueInRecord = (Comparable<Object>) valueInRecord;
+
+        switch (singleExp.compareOp) {
+            case "=":
+                return comparableValueInRecord.compareTo(conditionValue) == 0;
+            case ">":
+                return comparableValueInRecord.compareTo(conditionValue) > 0;
+            case "<":
+                return comparableValueInRecord.compareTo(conditionValue) < 0;
+            case ">=":
+                return comparableValueInRecord.compareTo(conditionValue) >= 0;
+            case "<=":
+                return comparableValueInRecord.compareTo(conditionValue) <= 0;
+            case "!=":
+                return comparableValueInRecord.compareTo(conditionValue) != 0;
+            // 其他比较操作
+            default:
+                throw new IllegalArgumentException("Unsupported comparison operation: " + singleExp.compareOp);
+        }
+    }
+
+    private Object string2Value(String value, String fieldName) {
+        //引入 fieldCache用于缓存字段名和 Field 对象之间的映射关系，减少多次查找同一字段的开销。
+        Field field = fieldCache.get(fieldName);
+        if (field == null){
+            for (Field f : fields) {
+                if (f.fieldName.equals(fieldName)){
+                    field = f;
+                    fieldCache.put(fieldName,field);
                     break;
                 }
             }
-            // 如果字段不存在，则抛出异常
-            if (fd == null) {
-                throw Error.FieldNotFoundException;
-            }
-            // 计算 WHERE 子句的搜索范围
-            CalWhereRes res = calWhere(fd, where);
-            l0 = res.l0;
-            r0 = res.r0;
-            l1 = res.l1;
-            r1 = res.r1;
-            single = res.single;
         }
 
-        // 在计算出的搜索范围内搜索记录
-        List<Long> uids = fd.search(l0, r0);
-        // 如果 WHERE 子句包含 OR 运算符，则需要搜索两个范围，并将结果合并
-        if (!single) {
-            List<Long> tmp = fd.search(l1, r1);
-            uids.addAll(tmp);
+        if (field != null){
+            Types.SupportedType type = Types.SupportedType.fromTypeName(field.fieldType);
+            return type.parseValue(value);
         }
-        // 返回搜索结果
-        return uids;
+        return null;
     }
+
 
     class CalWhereRes {
         long l0, r0, l1, r1;
@@ -341,6 +460,7 @@ public class Table {
 
     private CalWhereRes calWhere(Field fd, Where where) throws Exception {
         CalWhereRes res = new CalWhereRes();
+        if (where.logicOp == null) where.logicOp = "";
         switch (where.logicOp) {
             case "":
                 res.single = true;

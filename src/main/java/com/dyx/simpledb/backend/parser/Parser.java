@@ -157,19 +157,59 @@ public class Parser {
             exp1.compareOp = parts[1];
             exp1.value = parts[2];
             where.singleExp1 = exp1;
+
             if (parts.length > 3) {
-                where.logicOp = parts[3];
-                if (parts.length >= 7) {
+                // 检查逻辑操作符的有效性
+                String logicOp = parts[3].toLowerCase();
+                if (logicOp.equals("and") || logicOp.equals("or")) {
+                    where.logicOp = logicOp;
+                } else {
+                    throw new IllegalArgumentException("Invalid logical operation: " + logicOp);
+                }
+
+                // 检查第二个条件的完整性
+                if (parts.length == 7) {
                     SingleExpression exp2 = new SingleExpression();
                     exp2.field = parts[4];
                     exp2.compareOp = parts[5];
                     exp2.value = parts[6];
                     where.singleExp2 = exp2;
+                } else {
+                    throw new IllegalArgumentException("Invalid or incomplete second condition in WHERE clause.");
                 }
             }
+        } else {
+            throw new IllegalArgumentException("Incomplete WHERE clause.");
         }
+
+        // 额外检查：确保值部分格式正确
+        validateSingleExpression(where.singleExp1);
+        if (where.singleExp2 != null) {
+            validateSingleExpression(where.singleExp2);
+        }
+
         return where;
     }
+
+    private static void validateSingleExpression(SingleExpression exp) {
+        // 检查比较操作符是否有效
+        if (!isValidOperator(exp.compareOp)) {
+            throw new IllegalArgumentException("Invalid comparison operator: " + exp.compareOp);
+        }
+
+        // 检查值部分是否合理，例如不允许多个不合法的数值
+        // 例如 name = 20 30 40 是不合法的，这里可以添加具体的值验证逻辑
+        if (exp.value.split("\\s+").length > 1 && !exp.compareOp.equals("in")) {
+            throw new IllegalArgumentException("Invalid value format: " + exp.value);
+        }
+    }
+
+    private static boolean isValidOperator(String operator) {
+        return operator.equals("=") || operator.equals(">") || operator.equals("<") ||
+                operator.equals(">=") || operator.equals("<=") || operator.equals("!=") ||
+                operator.equals("in") || operator.equals("like");
+    }
+
 
     private static Create parseCreate(CreateTable createTable) {
         Create create = new Create();
