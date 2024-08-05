@@ -210,7 +210,6 @@ public class Parser {
                 operator.equals("in") || operator.equals("like");
     }
 
-
     private static Create parseCreate(CreateTable createTable) {
         Create create = new Create();
         create.tableName = createTable.getTable().getName();
@@ -234,7 +233,7 @@ public class Parser {
                         autoIncrement.add(columnDefinition.getColumnName());
                     } else if (columnSpec.equalsIgnoreCase("NOT")) {
                         notNull.add(columnDefinition.getColumnName());
-                    }else if (columnSpec.equalsIgnoreCase("UNIQUE")) {
+                    } else if (columnSpec.equalsIgnoreCase("UNIQUE")) {
                         unique.add(columnDefinition.getColumnName());
                     }
                 }

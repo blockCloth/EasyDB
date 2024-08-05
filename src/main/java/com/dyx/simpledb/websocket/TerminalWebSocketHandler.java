@@ -160,12 +160,12 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
         return escaped.toString();
     }
 
-    @Override
+    /*@Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) throws Exception {
         String clientIp = (String) session.getAttributes().get("clientIp");
         UserSession userSession = userManager.getUserSession(clientIp);
         if (userSession != null) {
             userSession.updateLastAccessedTime(); // 更新最后访问时间
         }
-    }
+    }*/
 }

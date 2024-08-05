@@ -207,20 +207,6 @@ public class Field {
                 res.shift = type.getShift(parsedValue);
             }
 
-            /*// 根据类型解析 byte 数组
-            if (type == Types.SupportedType.INT32 || type == Types.SupportedType.FLOAT || type == Types.SupportedType.INT) {
-                res.v = Parser.parseInt(Arrays.copyOf(raw, 4));
-                res.shift = 4;
-            } else if (type == Types.SupportedType.INT64 || type == Types.SupportedType.DOUBLE) {
-                res.v = Parser.parseLong(Arrays.copyOf(raw, 8));
-                res.shift = 8;
-            } else if (type == Types.SupportedType.STRING || type == Types.SupportedType.VARCHAR) {
-                ParseStringRes r = Parser.parseString(raw);
-                res.v = r.str;
-                res.shift = r.next;
-            } else {
-                throw new IllegalArgumentException("Unsupported type: " + fieldType);
-            }*/
         } catch (IllegalArgumentException e) {
             // 处理不支持的类型
             e.printStackTrace();

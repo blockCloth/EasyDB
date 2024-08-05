@@ -31,8 +31,6 @@ public class Table {
     public static final String GEN_CLUST_INDEX = "GEN_CLUST_INDEX";
     // 存储需要自增的字段
     static Set<String> autoIncrementFields = new HashSet<>();
-    static Set<Long> uidSet = new HashSet<>();
-    private Map<Long, byte[]> dataStore = new HashMap<>(); // 存储数据的映射，假设数据以 byte[] 形式存储
     //定义一个字段缓存，用于全表查询
     private Map<String,Field> fieldCache = new HashMap<>();
 
@@ -140,8 +138,6 @@ public class Table {
         for (Long uid : uids) {
             if (((TableManagerImpl) tbm).vm.delete(xid, uid)) {
                 count++;
-                uidSet.remove(uid);
-                dataStore.remove(uid);
             }
         }
         return count;
@@ -172,9 +168,6 @@ public class Table {
             raw = entry2Raw(entry);
             long uuid = ((TableManagerImpl) tbm).vm.insert(xid, raw);
 
-            dataStore.put(uuid, raw); // 更新 dataStore
-            uidSet.remove(uid);
-            uidSet.add(uuid);
             count++;
 
             for (Field field : fields) {
@@ -187,23 +180,21 @@ public class Table {
     }
 
     public String read(long xid, SelectObj read) throws Exception {
-        List<Long> uids = parseWhere(read.where,xid);
-        StringBuilder sb = new StringBuilder();
+        List<Long> uids = parseWhere(read.where, xid);
+        List<Map<String, Object>> entries = new ArrayList<>();
         for (Long uid : uids) {
             byte[] raw = ((TableManagerImpl) tbm).vm.read(xid, uid);
             if (raw == null) continue;
             Map<String, Object> entry = parseEntry(raw);
-            sb.append(printEntry(entry)).append("\n");
+            entries.add(entry);
         }
-        return sb.toString();
+        return printEntries(entries);
     }
 
     public void insert(long xid, InsertObj insertObj) throws Exception {
         Map<String, Object> entry = string2Entry(insertObj);
         byte[] raw = entry2Raw(entry);
         long uid = ((TableManagerImpl) tbm).vm.insert(xid, raw);
-        dataStore.put(uid,raw);
-        uidSet.add(uid);
 
         for (Field field : fields) {
             if (field.isIndexed()) {
@@ -295,61 +286,75 @@ public class Table {
         return entry;
     }
 
-    private List<Long> parseWhere(Where where,long xid) throws Exception {
-        // 初始化搜索范围和标志位
-        long l0 = 0, r0 = 0, l1 = 0, r1 = 0;
-        boolean single = false;
-        Field fieldIndex1 = null;
-        Field fieldIndex2 = null;
-
-        // 如果 WHERE 子句为空，则执行全表扫描
-        if (where == null) {
-            // 返回所有记录的 UID
+    private List<Long> parseWhere(Where where, long xid) throws Exception {
+        if (where == null)
             return getAllUid();
+
+        Field indexedField1 = findIndexedField(where.singleExp1.field);
+        Field indexedField2 = where.singleExp2 != null ? findIndexedField(where.singleExp2.field) : null;
+
+        List<Long> uids;
+
+        // 如果两个条件字段都没有索引，执行全表扫描
+        if (indexedField1 == null && indexedField2 == null) {
+            return performFullTableScanWithCondition(where, xid);
         }
 
-        // 查找与 WHERE 子句条件匹配的字段
-        for (Field field : fields) {
-            if (field.fieldName.equals(where.singleExp1.field) && field.isIndexed()) {
-                fieldIndex1 = field;
-            }else if (field.fieldName.equals(where.singleExp1.field) && field.isIndexed()){
-                fieldIndex2 = field;
+        // 如果第一个条件字段有索引，使用第一个条件字段进行初步查询
+        if (indexedField1 != null) {
+            CalWhereRes res = calWhere(indexedField1, where.singleExp1);
+            uids = indexedField1.search(res.l0, res.r0);
+
+            // 如果存在第二个条件字段
+            if (where.singleExp2 != null) {
+                // 如果第二个条件字段也有索引，进行第二次索引查询
+                if (indexedField2 != null) {
+                    CalWhereRes res2 = calWhere(indexedField2, where.singleExp2);
+                    List<Long> additionalUids = indexedField2.search(res2.l0, res2.r0);
+
+                    if ("and".equals(where.logicOp)) {
+                        uids.retainAll(additionalUids); // 取交集
+                    } else {
+                        Set<Long> mergedSet = new HashSet<>(uids);
+                        mergedSet.addAll(additionalUids);
+                        uids = new ArrayList<>(mergedSet); // 取并集
+                    }
+                } else {
+                    // 如果第二个条件字段没有索引，执行全表扫描，并取并集
+                    List<Long> additionalUids = performFullTableScanWithCondition(new Where(where.singleExp2), xid);
+                    if ("and".equals(where.logicOp)) {
+                        uids.retainAll(additionalUids); // 取交集
+                    } else {
+                        Set<Long> mergedSet = new HashSet<>(uids);
+                        mergedSet.addAll(additionalUids);
+                        uids = new ArrayList<>(mergedSet); // 取并集
+                    }
+                }
             }
-        }
+        } else {
+            // 如果第一个条件字段没有索引但第二个条件字段有索引
+            CalWhereRes res = calWhere(indexedField2, where.singleExp2);
+            uids = indexedField2.search(res.l0, res.r0);
 
-        //选择最合适的索引字段
-        Field selectIndex = selectBestIndexed(fieldIndex1,fieldIndex2);
-
-        // 如果没有找到有索引的字段或 WHERE 子句中的字段没有索引
-        if (fieldIndex1 == null) {
-            // 执行全表扫描
-            return performFullTableScanWithCondition(where,xid);
-        }
-
-        // 计算 WHERE 子句的搜索范围
-        CalWhereRes res = calWhere(fieldIndex1, where);
-        l0 = res.l0;
-        r0 = res.r0;
-        l1 = res.l1;
-        r1 = res.r1;
-        single = res.single;
-
-        // 使用索引字段进行搜索
-        List<Long> uids = fieldIndex1.search(l0, r0);
-
-        // 如果 WHERE 子句包含 OR 运算符，需要处理两个范围
-        if (!single) {
-            List<Long> tmp = fieldIndex1.search(l1, r1);
-            uids.addAll(tmp);
+            // 因为第一个条件字段没有索引，需要全表扫描
+            List<Long> additionalUids = performFullTableScanWithCondition(new Where(where.singleExp1), xid);
+            if ("and".equals(where.logicOp)) {
+                uids.retainAll(additionalUids); // 取交集
+            } else {
+                Set<Long> mergedSet = new HashSet<>(uids);
+                mergedSet.addAll(additionalUids);
+                uids = new ArrayList<>(mergedSet); // 取并集
+            }
         }
 
         return uids;
     }
 
-    // 选择最好的索引字段，默认情况下为index1
-    private Field selectBestIndexed(Field fieldIndex1, Field fieldIndex2) {
-        // if (fieldIndex1 == null) return fieldIndex2;
-        // if ()
+    private Field findIndexedField(String fieldName) {
+        return fields.stream()
+                .filter(field -> field.fieldName.equals(fieldName) && field.isIndexed())
+                .findFirst()
+                .orElse(null);
     }
 
     private List<Long> getAllUid() throws Exception {
@@ -434,16 +439,10 @@ public class Table {
 
     private Object string2Value(String value, String fieldName) {
         //引入 fieldCache用于缓存字段名和 Field 对象之间的映射关系，减少多次查找同一字段的开销。
-        Field field = fieldCache.get(fieldName);
-        if (field == null){
-            for (Field f : fields) {
-                if (f.fieldName.equals(fieldName)){
-                    field = f;
-                    fieldCache.put(fieldName,field);
-                    break;
-                }
-            }
-        }
+        Field field = fieldCache.computeIfAbsent(fieldName, k -> fields.stream()
+                .filter(f -> f.fieldName.equals(k))
+                .findFirst()
+                .orElse(null));
 
         if (field != null){
             Types.SupportedType type = Types.SupportedType.fromTypeName(field.fieldType);
@@ -458,59 +457,20 @@ public class Table {
         boolean single;
     }
 
-    private CalWhereRes calWhere(Field fd, Where where) throws Exception {
+    private CalWhereRes calWhere(Field field, SingleExpression exp) throws Exception {
         CalWhereRes res = new CalWhereRes();
-        if (where.logicOp == null) where.logicOp = "";
-        switch (where.logicOp) {
-            case "":
-                res.single = true;
-                FieldCalRes r = fd.calExp(where.singleExp1);
-                res.l0 = r.left;
-                res.r0 = r.right;
-                break;
-            case "or":
-                res.single = false;
-                r = fd.calExp(where.singleExp1);
-                res.l0 = r.left;
-                res.r0 = r.right;
-                r = fd.calExp(where.singleExp2);
-                res.l1 = r.left;
-                res.r1 = r.right;
-                break;
-            case "and":
-                res.single = true;
-                r = fd.calExp(where.singleExp1);
-                res.l0 = r.left;
-                res.r0 = r.right;
-                r = fd.calExp(where.singleExp2);
-                res.l1 = r.left;
-                res.r1 = r.right;
-                if (res.l1 > res.l0) res.l0 = res.l1;
-                if (res.r1 < res.r0) res.r0 = res.r1;
-                break;
-            default:
-                throw Error.InvalidLogOpException;
-        }
+        FieldCalRes r = field.calExp(exp);
+        res.l0 = r.left;
+        res.r0 = r.right;
+        res.single = true;
         return res;
     }
 
-    /*  private String printEntry(Map<String, Object> entry) {
-          StringBuilder sb = new StringBuilder("[");
-          for (int i = 0; i < fields.size(); i++) {
-              Field field = fields.get(i);
-              if (field.fieldName.equals(GEN_CLUST_INDEX)){
-                  continue;
-              }
-              sb.append(field.printValue(entry.get(field.fieldName)));
-              if (i == fields.size() - 1) {
-                  sb.append("]");
-              } else {
-                  sb.append(", ");
-              }
-          }
-          return sb.toString();
-      }*/
-    private String printEntry(Map<String, Object> entry) {
+
+
+    private String printEntries(List<Map<String, Object>> entries) {
+        if (entries == null || entries.isEmpty()) return "";
+
         // 存储每列的最大宽度
         Map<String, Integer> columnWidths = new HashMap<>();
 
@@ -521,9 +481,11 @@ public class Table {
             }
             String fieldName = field.fieldName;
             int maxLength = fieldName.length();
-            String value = field.printValue(entry.get(fieldName));
-            if (value.length() > maxLength) {
-                maxLength = value.length();
+            for (Map<String, Object> entry : entries) {
+                String value = field.printValue(entry.get(fieldName));
+                if (value.length() > maxLength) {
+                    maxLength = value.length();
+                }
             }
             columnWidths.put(fieldName, maxLength);
         }
@@ -543,32 +505,34 @@ public class Table {
         sb.append("\n");
 
         // 输出分隔符
-        sb.append("|");
+        sb.append("+");
         for (Field field : fields) {
             if (field.fieldName.equals(GEN_CLUST_INDEX)) {
                 continue;
             }
-            String fieldName = field.fieldName;
-            int width = columnWidths.get(fieldName);
-            sb.append(repeat("-", width)).append("|");
+            int width = columnWidths.get(field.fieldName);
+            sb.append(repeat("-", width)).append("+");
         }
         sb.append("\n");
 
         // 输出数据
-        sb.append("|");
-        for (Field field : fields) {
-            if (field.fieldName.equals(GEN_CLUST_INDEX)) {
-                continue;
+        for (Map<String, Object> entry : entries) {
+            sb.append("|");
+            for (Field field : fields) {
+                if (field.fieldName.equals(GEN_CLUST_INDEX)) {
+                    continue;
+                }
+                String fieldName = field.fieldName;
+                String value = field.printValue(entry.get(fieldName));
+                int width = columnWidths.get(fieldName);
+                sb.append(String.format("%-" + width + "s|", value));
             }
-            String fieldName = field.fieldName;
-            String value = field.printValue(entry.get(fieldName));
-            int width = columnWidths.get(fieldName);
-            sb.append(String.format("%-" + width + "s|", value));
+            sb.append("\n");
         }
 
         return sb.toString();
     }
-    
+
     public static String repeat(String str, int times) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < times; i++) {
@@ -576,6 +540,7 @@ public class Table {
         }
         return sb.toString();
     }
+
 
     private Map<String, Object> parseEntry(byte[] raw) {
         int pos = 0;
