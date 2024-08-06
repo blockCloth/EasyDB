@@ -1,6 +1,7 @@
 package com.dyx.simpledb.backend.tbm;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 import cn.hutool.core.util.StrUtil;
 import com.dyx.simpledb.backend.parser.statement.*;
@@ -31,8 +32,8 @@ public class Table {
     public static final String GEN_CLUST_INDEX = "GEN_CLUST_INDEX";
     // 存储需要自增的字段
     static Set<String> autoIncrementFields = new HashSet<>();
-    //定义一个字段缓存，用于全表查询
-    private Map<String,Field> fieldCache = new HashMap<>();
+    // 定义一个字段缓存，用于全表查询
+    private Map<String, Field> fieldCache = new HashMap<>();
 
     public static Table loadTable(TableManager tbm, long uid) {
         byte[] raw = null;
@@ -133,7 +134,7 @@ public class Table {
     }
 
     public int delete(long xid, DeleteObj deleteObj) throws Exception {
-        List<Long> uids = parseWhere(deleteObj.where,xid);
+        List<Long> uids = parseWhere(deleteObj.where, xid);
         int count = 0;
         for (Long uid : uids) {
             if (((TableManagerImpl) tbm).vm.delete(xid, uid)) {
@@ -144,7 +145,7 @@ public class Table {
     }
 
     public int update(long xid, UpdateObj updateObj) throws Exception {
-        List<Long> uids = parseWhere(updateObj.where,xid);
+        List<Long> uids = parseWhere(updateObj.where, xid);
         Field fd = null;
         for (Field f : fields) {
             if (f.fieldName.equals(updateObj.fieldName)) {
@@ -182,13 +183,57 @@ public class Table {
     public String read(long xid, SelectObj read) throws Exception {
         List<Long> uids = parseWhere(read.where, xid);
         List<Map<String, Object>> entries = new ArrayList<>();
+        String[] fieldsToOutput;
+
+        // 获取需要输出的列名，实现指定查找
+        if (read.fields.length == 1 && read.fields[0].equals("*")) {
+            fieldsToOutput = fields.stream().map(field -> field.fieldName).toArray(String[]::new);
+        } else {
+            fieldsToOutput = read.fields;
+        }
+
         for (Long uid : uids) {
             byte[] raw = ((TableManagerImpl) tbm).vm.read(xid, uid);
             if (raw == null) continue;
+
             Map<String, Object> entry = parseEntry(raw);
-            entries.add(entry);
+            // 保留用户选择字段
+            if (read.fields.length == 1 && read.fields[0].equals("*")) {
+                entries.add(entry);
+            } else {
+                Map<String, Object> filterEntry = new HashMap<>();
+                for (String fieldName : read.fields) {
+                    if (entry.containsKey(fieldName)) {
+                        filterEntry.put(fieldName, entry.get(fieldName));
+                    }
+                }
+                entries.add(filterEntry);
+            }
         }
-        return printEntries(entries);
+
+        // 对 entries 进行排序
+        if (read.orderByExpression != null && read.orderByExpression.fields.length > 0) {
+            entries = entries.stream().sorted(new Comparator<Map<String, Object>>() {
+                @Override
+                public int compare(Map<String, Object> o1, Map<String, Object> o2) {
+                    for (int i = 0; i < read.orderByExpression.fields.length; i++) {
+                        String field = read.orderByExpression.fields[i];
+                        boolean ascending = read.orderByExpression.order[i];
+
+                        Comparable val1 = (Comparable) o1.get(field);
+                        Comparable val2 = (Comparable) o2.get(field);
+
+                        int cmp = val1.compareTo(val2);
+                        if (cmp != 0) {
+                            return ascending ? cmp : -cmp;
+                        }
+                    }
+                    return 0;
+                }
+            }).collect(Collectors.toList());
+        }
+
+        return printEntries(entries, fieldsToOutput);
     }
 
     public void insert(long xid, InsertObj insertObj) throws Exception {
@@ -233,11 +278,12 @@ public class Table {
                         v = field.string2Value(String.valueOf(field.atomicInteger.getAndIncrement()));
                     }
                 } else if (valuesIndex < insertObj.values.length) {
-                    v = field.string2Value(insertObj.values[valuesIndex]);
+                    v = field.string2Value(removeQuotes(insertObj.values[valuesIndex]));
                     valuesIndex++;
                 } else {
                     v = field.defaultValue;
                 }
+
                 entry.put(field.fieldName, v);
 
                 // 检查唯一性约束
@@ -261,7 +307,7 @@ public class Table {
         for (Field field : fields) {
             Object v;
             if (specifiedFields.contains(field.fieldName)) {
-                v = field.string2Value(insertObj.values[valuesIndex++]);
+                v = field.string2Value(removeQuotes(insertObj.values[valuesIndex++]));
                 // 检查唯一性约束
                 if (field.isUnique && field.valueExists(v)) {
                     throw new IllegalArgumentException("Field " + field.fieldName + " must be unique.");
@@ -284,6 +330,14 @@ public class Table {
         }
 
         return entry;
+    }
+
+    // 去除字符串前后引号
+    private String removeQuotes(String value) {
+        if (value != null && value.length() > 1 && value.startsWith("\"") && value.endsWith("\"")) {
+            return value.substring(1, value.length() - 1);
+        }
+        return value;
     }
 
     private List<Long> parseWhere(Where where, long xid) throws Exception {
@@ -360,18 +414,18 @@ public class Table {
     private List<Long> getAllUid() throws Exception {
         Field fd = null;
         for (Field field : fields) {
-            if (field.isIndexed()){
+            if (field.isIndexed()) {
                 fd = field;
                 break;
             }
         }
-        return fd.search(0,Integer.MAX_VALUE);
+        return fd.search(0, Integer.MAX_VALUE);
     }
 
-    private List<Long> performFullTableScanWithCondition(Where where,long xid) throws Exception {
+    private List<Long> performFullTableScanWithCondition(Where where, long xid) throws Exception {
         List<Long> uids = new ArrayList<>();
         for (Long uid : getAllUid()) {
-            byte[] data = ((TableManagerImpl)tbm).vm.read(xid,uid);
+            byte[] data = ((TableManagerImpl) tbm).vm.read(xid, uid);
             if (data == null) continue;
 
             Map<String, Object> record = parseEntry(data);
@@ -386,14 +440,14 @@ public class Table {
     private boolean satisfiesCondition(Map<String, Object> record, Where where) throws Exception {
         // 先初始化处理singleExp1
         boolean result1 = checkSingleCondition(record, where.singleExp1);
-        if (where.singleExp2 == null){
+        if (where.singleExp2 == null) {
             return result1;
         }
 
-        //再次处理singleExp2的结果
-        boolean result2 = checkSingleCondition(record,where.singleExp2);
+        // 再次处理singleExp2的结果
+        boolean result2 = checkSingleCondition(record, where.singleExp2);
 
-        switch (where.logicOp){
+        switch (where.logicOp) {
             case "and":
                 return result1 && result2;
             case "or":
@@ -409,7 +463,7 @@ public class Table {
         if (valueInRecord == null) return false; // 记录中没有对应的字段
 
         // 使用 string2Value 将条件的字符串值转换为适当的对象类型
-        Object conditionValue = string2Value(singleExp.value,singleExp.field);
+        Object conditionValue = string2Value(singleExp.value, singleExp.field);
 
         // 如果转换后的值为空，说明类型不匹配或字段不存在，返回 false
         if (conditionValue == null) return false;
@@ -418,7 +472,7 @@ public class Table {
         @SuppressWarnings("unchecked")
         Comparable<Object> comparableValueInRecord = (Comparable<Object>) valueInRecord;
 
-        switch (singleExp.compareOp) {
+        switch (singleExp.compareOp.toLowerCase()) {
             case "=":
                 return comparableValueInRecord.compareTo(conditionValue) == 0;
             case ">":
@@ -431,6 +485,8 @@ public class Table {
                 return comparableValueInRecord.compareTo(conditionValue) <= 0;
             case "!=":
                 return comparableValueInRecord.compareTo(conditionValue) != 0;
+            case "like":
+                return ((String) valueInRecord).contains((String) conditionValue);
             // 其他比较操作
             default:
                 throw new IllegalArgumentException("Unsupported comparison operation: " + singleExp.compareOp);
@@ -438,13 +494,13 @@ public class Table {
     }
 
     private Object string2Value(String value, String fieldName) {
-        //引入 fieldCache用于缓存字段名和 Field 对象之间的映射关系，减少多次查找同一字段的开销。
+        // 引入 fieldCache用于缓存字段名和 Field 对象之间的映射关系，减少多次查找同一字段的开销。
         Field field = fieldCache.computeIfAbsent(fieldName, k -> fields.stream()
                 .filter(f -> f.fieldName.equals(k))
                 .findFirst()
                 .orElse(null));
 
-        if (field != null){
+        if (field != null) {
             Types.SupportedType type = Types.SupportedType.fromTypeName(field.fieldType);
             return type.parseValue(value);
         }
@@ -466,71 +522,68 @@ public class Table {
         return res;
     }
 
-
-
-    private String printEntries(List<Map<String, Object>> entries) {
+    private String printEntries(List<Map<String, Object>> entries, String[] selectedFields) {
         if (entries == null || entries.isEmpty()) return "";
 
-        // 存储每列的最大宽度
-        Map<String, Integer> columnWidths = new HashMap<>();
+        Map<String, Integer> columnWidths = calculateColumnWidths(entries, selectedFields);
 
-        // 计算每列的最大宽度
-        for (Field field : fields) {
-            if (field.fieldName.equals(GEN_CLUST_INDEX)) {
-                continue;
-            }
-            String fieldName = field.fieldName;
-            int maxLength = fieldName.length();
+        StringBuilder sb = new StringBuilder();
+
+        printSeparator(sb, columnWidths, selectedFields);
+        printColumnNames(sb, columnWidths, selectedFields);
+        printSeparator(sb, columnWidths, selectedFields);
+        printData(sb, columnWidths, selectedFields, entries);
+        printSeparator(sb, columnWidths, selectedFields);
+
+
+        return sb.toString().endsWith("\n")
+                ? sb.toString().substring(0, sb.toString().length() - 1)
+                : sb.toString();
+    }
+
+    private Map<String, Integer> calculateColumnWidths(List<Map<String, Object>> entries, String[] selectedFields) {
+        Map<String, Integer> columnWidths = new HashMap<>();
+        for (String col : selectedFields) {
+            int maxLength = col.length();
             for (Map<String, Object> entry : entries) {
-                String value = field.printValue(entry.get(fieldName));
+                String value = entry.get(col) != null ? entry.get(col).toString() : "NULL";
                 if (value.length() > maxLength) {
                     maxLength = value.length();
                 }
             }
-            columnWidths.put(fieldName, maxLength);
+            columnWidths.put(col, maxLength);
         }
+        return columnWidths;
+    }
 
-        StringBuilder sb = new StringBuilder();
-
-        // 输出列名
-        sb.append("|");
-        for (Field field : fields) {
-            if (field.fieldName.equals(GEN_CLUST_INDEX)) {
-                continue;
-            }
-            String fieldName = field.fieldName;
-            int width = columnWidths.get(fieldName);
-            sb.append(String.format("%-" + width + "s|", fieldName));
-        }
-        sb.append("\n");
-
-        // 输出分隔符
+    private void printSeparator(StringBuilder sb, Map<String, Integer> columnWidths, String[] selectedFields) {
         sb.append("+");
-        for (Field field : fields) {
-            if (field.fieldName.equals(GEN_CLUST_INDEX)) {
-                continue;
-            }
-            int width = columnWidths.get(field.fieldName);
+        for (String col : selectedFields) {
+            int width = columnWidths.get(col);
             sb.append(repeat("-", width)).append("+");
         }
         sb.append("\n");
+    }
 
-        // 输出数据
+    private void printColumnNames(StringBuilder sb, Map<String, Integer> columnWidths, String[] selectedFields) {
+        sb.append("|");
+        for (String col : selectedFields) {
+            int width = columnWidths.get(col);
+            sb.append(String.format("%-" + width + "s|", col));
+        }
+        sb.append("\n");
+    }
+
+    private void printData(StringBuilder sb, Map<String, Integer> columnWidths, String[] selectedFields, List<Map<String, Object>> entries) {
         for (Map<String, Object> entry : entries) {
             sb.append("|");
-            for (Field field : fields) {
-                if (field.fieldName.equals(GEN_CLUST_INDEX)) {
-                    continue;
-                }
-                String fieldName = field.fieldName;
-                String value = field.printValue(entry.get(fieldName));
-                int width = columnWidths.get(fieldName);
+            for (String col : selectedFields) {
+                String value = entry.get(col) != null ? entry.get(col).toString() : "NULL";
+                int width = columnWidths.get(col);
                 sb.append(String.format("%-" + width + "s|", value));
             }
             sb.append("\n");
         }
-
-        return sb.toString();
     }
 
     public static String repeat(String str, int times) {

@@ -62,26 +62,52 @@ public class Parser {
     private static SelectObj parseSelect(Select select) {
         SelectObj read = new SelectObj();
         List<String> fields = new ArrayList<>();
+        List<String> orderFields = new ArrayList<>();
+        List<Boolean> orderAscFields = new ArrayList<>();
+
         select.getSelectBody().accept(new SelectVisitorAdapter() {
             @Override
             public void visit(PlainSelect plainSelect) {
+                // 处理 SELECT 字段
                 plainSelect.getSelectItems().forEach(selectItem -> {
-                    if (selectItem instanceof SelectExpressionItem) {
-                        SelectExpressionItem expressionItem = (SelectExpressionItem) selectItem;
-                        fields.add(expressionItem.getExpression().toString());
-                    } else {
-                        fields.add(selectItem.toString());
-                    }
+                    String fieldName = selectItem instanceof SelectExpressionItem
+                            ? ((SelectExpressionItem) selectItem).getExpression().toString()
+                            : selectItem.toString();
+                    fields.add(fieldName);
                 });
+
+                // 处理 ORDER BY 字段
+                if (plainSelect.getOrderByElements() != null) {
+                    plainSelect.getOrderByElements().forEach(orderByElement -> {
+                        String orderField = orderByElement.getExpression().toString();
+                        orderFields.add(orderField);
+                        orderAscFields.add(orderByElement.isAsc());
+                    });
+                }
+
+                // 设置查询字段和表名
                 read.fields = fields.toArray(new String[0]);
                 read.tableName = plainSelect.getFromItem().toString();
+
+                // 初始化 ORDER BY 表达式
+                read.orderByExpression = new OrderByExpression();
+                // 设置 ORDER BY 表达式
+                read.orderByExpression.fields = orderFields.toArray(new String[0]);
+                read.orderByExpression.order = new boolean[orderAscFields.size()];
+                for (int i = 0; i < orderAscFields.size(); i++) {
+                    read.orderByExpression.order[i] = orderAscFields.get(i);
+                }
+
+                // 设置 WHERE 子句
                 if (plainSelect.getWhere() != null) {
                     read.where = parseWhere(plainSelect.getWhere().toString());
                 }
             }
         });
+
         return read;
     }
+
 
     private static Show parseShow(Tokenizer tokenizer) throws Exception {
         String tmp = tokenizer.peek();
@@ -207,7 +233,7 @@ public class Parser {
     private static boolean isValidOperator(String operator) {
         return operator.equals("=") || operator.equals(">") || operator.equals("<") ||
                 operator.equals(">=") || operator.equals("<=") || operator.equals("!=") ||
-                operator.equals("in") || operator.equals("like");
+                operator.equalsIgnoreCase("in") || operator.equalsIgnoreCase("like");
     }
 
     private static Create parseCreate(CreateTable createTable) {

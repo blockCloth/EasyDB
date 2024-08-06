@@ -7,4 +7,5 @@ public class SelectObj {
     public String tableName;
     public String[] fields;
     public Where where;
+    public OrderByExpression orderByExpression;
 }

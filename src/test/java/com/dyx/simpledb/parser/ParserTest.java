@@ -10,10 +10,14 @@ import net.sf.jsqlparser.statement.create.table.CreateTable;
 import net.sf.jsqlparser.statement.create.table.Index;
 import net.sf.jsqlparser.statement.create.table.NamedConstraint;
 import org.junit.Test;
+import org.mockito.internal.util.collections.ListUtil;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 
 /**
@@ -42,25 +46,20 @@ public class ParserTest {
     }
 
     @Test
-    public void create() throws Exception {
-        String sql = "CREATE TABLE user (id INT, name VARCHAR(255), email VARCHAR(255), INDEX idx_name (name), INDEX idx_email (email))";
-        try {
-            Statement statement = CCJSqlParserUtil.parse(sql);
-            if (statement instanceof CreateTable) {
-                Create create = parseCreate((CreateTable) statement);
-                System.out.println("Table Name: " + create.tableName);
-                for (int i = 0; i < create.fieldName.length; i++) {
-                    System.out.println("Field Name: " + create.fieldName[i] + ", Field Type: " + create.fieldType[i]);
-                }
-                for (String index : create.index) {
-                    System.out.println("Index Column: " + index);
-                }
-            } else {
-                System.out.println("The provided SQL is not a CREATE TABLE statement.");
-            }
-        } catch (JSQLParserException e) {
-            e.printStackTrace();
-        }
+    public void testParseCreate() throws Exception {
+        // Create a mock SQL create table statement
+        String sql = "CREATE TABLE employee (" +
+                "employee_id INT AUTO_INCREMENT PRIMARY_KEY, " +
+                "name VARCHAR(255) NOT_NULL, " +
+                "email VARCHAR(255), " +
+                "INDEX idx_email (email)" +
+                ")";
+
+        // Parse the SQL create table statement
+        CreateTable createTable = (CreateTable) CCJSqlParserUtil.parse(sql);
+        Create create = parseCreate(createTable);
+
+        System.out.println(create);
     }
 
     private static Create parseCreate(CreateTable createTable) {
@@ -69,10 +68,26 @@ public class ParserTest {
         List<String> fieldNames = new ArrayList<>();
         List<String> fieldTypes = new ArrayList<>();
         List<String> indexes = new ArrayList<>();
+        List<String> primaryKey = new ArrayList<>();
+        List<String> autoIncrement = new ArrayList<>();
+        List<String> notNull = new ArrayList<>();
+
 
         for (ColumnDefinition columnDefinition : createTable.getColumnDefinitions()) {
             fieldNames.add(columnDefinition.getColumnName());
             fieldTypes.add(columnDefinition.getColDataType().toString());
+
+            if (columnDefinition.getColumnSpecs() != null) {
+                for (String columnSpec : columnDefinition.getColumnSpecs()) {
+                    if (columnSpec.equalsIgnoreCase("PRIMARY_KEY")) {
+                        primaryKey.add(columnDefinition.getColumnName());
+                    } else if (columnSpec.equalsIgnoreCase("AUTO_INCREMENT")) {
+                        autoIncrement.add(columnDefinition.getColumnName());
+                    } else if (columnSpec.equalsIgnoreCase("NOT_NULL")) {
+                        notNull.add(columnDefinition.getColumnName());
+                    }
+                }
+            }
         }
 
         if (createTable.getIndexes() != null) {
@@ -87,9 +102,12 @@ public class ParserTest {
         create.fieldName = fieldNames.toArray(new String[0]);
         create.fieldType = fieldTypes.toArray(new String[0]);
         create.index = indexes.toArray(new String[0]);
+        create.autoIncrement = autoIncrement.toArray(new String[0]);
+        create.notNull = notNull.toArray(new String[0]);
 
         return create;
     }
+
     @Test
     public void insert() throws Exception {
         String sql = "INSERT INTO user VALUES (\"zhangsan\");";

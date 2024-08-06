@@ -51,17 +51,17 @@ public class UserManager {
         userCount.decrementAndGet();
     }
 
-    @Scheduled(fixedRate = 60000) // 每分钟执行一次
-    public void checkSessions() {
-        long currentTime = System.currentTimeMillis();
-        activeUsers.forEach((userId, session) -> {
-            if (currentTime - session.getLastAccessedTime() >= SESSION_EXPIRY_CHECK_INTERVAL ||
-                    currentTime - session.getStartTime() >= MAX_SESSION_DURATION) {
-                removeUserSession(userId);
-                destroyDatabase(userId);
-            }
-        });
-    }
+    // @Scheduled(fixedRate = 60000) // 每分钟执行一次
+    // public void checkSessions() {
+    //     long currentTime = System.currentTimeMillis();
+    //     activeUsers.forEach((userId, session) -> {
+    //         if (currentTime - session.getLastAccessedTime() >= SESSION_EXPIRY_CHECK_INTERVAL ||
+    //                 currentTime - session.getStartTime() >= MAX_SESSION_DURATION) {
+    //             removeUserSession(userId);
+    //             destroyDatabase(userId);
+    //         }
+    //     });
+    // }
 
     public void destroyDatabase(String userId) {
         // 删除数据库目录和文件的逻辑

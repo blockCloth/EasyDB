@@ -85,7 +85,15 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
                 initializeDatabase(userSession, dbFilePath);
             } else {
                 // 如果数据库文件不存在，则创建一个新的数据库文件
-                Launcher.createDB(dbFilePath);
+                // Launcher.createDB(dbFilePath);
+               /* public static void createDB(String path) {
+                    TransactionManager tm = TransactionManager.create(path);
+                    DataManager dm = DataManager.create(path, DEFALUT_MEM, tm);
+                    VersionManager vm = new VersionManagerImpl(tm, dm);
+                    TableManager.create(path, vm, dm);
+                    tm.close();
+                    dm.close();
+                }*/
                 initializeDatabase(userSession, dbFilePath);
             }
         } catch (Exception e) {
