@@ -25,7 +25,7 @@ public class VersionManagerImpl extends AbstractCache<Entry> implements VersionM
         this.tm = tm;
         this.dm = dm;
         this.activeTransaction = new HashMap<>();
-        activeTransaction.put(TransactionManagerImpl.SUPER_XID, Transaction.newTransaction(TransactionManagerImpl.SUPER_XID, 0, null));
+        activeTransaction.put(TransactionManagerImpl.SUPER_XID, Transaction.newTransaction(TransactionManagerImpl.SUPER_XID, IsolationLevel.READ_COMMITTED, null));
         this.lock = new ReentrantLock();
         this.lt = new LockTable();
     }
@@ -132,11 +132,11 @@ public class VersionManagerImpl extends AbstractCache<Entry> implements VersionM
     }
 
     @Override
-    public long begin(int level) {
+    public long begin(IsolationLevel isolationLevel) {
         lock.lock();
         try {
             long xid = tm.begin();
-            Transaction t = Transaction.newTransaction(xid, level, activeTransaction);
+            Transaction t = Transaction.newTransaction(xid, isolationLevel, activeTransaction);
             activeTransaction.put(xid, t);
             return xid;
         } finally {

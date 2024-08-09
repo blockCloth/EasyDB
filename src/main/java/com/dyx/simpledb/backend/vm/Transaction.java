@@ -9,15 +9,16 @@ import com.dyx.simpledb.backend.tm.TransactionManagerImpl;
 public class Transaction {
     public long xid;
     public int level;
+    public IsolationLevel isolationLevel;
     public Map<Long, Boolean> snapshot;
     public Exception err;
     public boolean autoAborted;
 
-    public static Transaction newTransaction(long xid, int level, Map<Long, Transaction> active) {
+    public static Transaction newTransaction(long xid, IsolationLevel isolationLevel, Map<Long, Transaction> active) {
         Transaction t = new Transaction();
         t.xid = xid;
-        t.level = level;
-        if(level != 0) {
+        t.isolationLevel = isolationLevel;
+        if(isolationLevel != IsolationLevel.READ_COMMITTED) {
             t.snapshot = new HashMap<>();
             for(Long x : active.keySet()) {
                 t.snapshot.put(x, true);

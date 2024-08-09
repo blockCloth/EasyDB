@@ -7,7 +7,7 @@ package com.dyx.simpledb.backend.parser.statement;
  */
 public class OrderByExpression {
     public String[] fields;
-    public boolean[] order;
+    public Boolean[] order;
 
     public OrderByExpression() {
     }

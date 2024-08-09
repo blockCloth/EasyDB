@@ -5,6 +5,7 @@ import java.util.List;
 
 import com.dyx.simpledb.backend.parser.statement.*;
 import com.dyx.simpledb.backend.parser.statement.DeleteObj;
+import com.dyx.simpledb.backend.vm.IsolationLevel;
 import com.dyx.simpledb.common.Error;
 import net.sf.jsqlparser.JSQLParserException;
 import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
@@ -93,10 +94,7 @@ public class Parser {
                 read.orderByExpression = new OrderByExpression();
                 // 设置 ORDER BY 表达式
                 read.orderByExpression.fields = orderFields.toArray(new String[0]);
-                read.orderByExpression.order = new boolean[orderAscFields.size()];
-                for (int i = 0; i < orderAscFields.size(); i++) {
-                    read.orderByExpression.order[i] = orderAscFields.get(i);
-                }
+                read.orderByExpression.order = orderAscFields.toArray(new Boolean[0]);
 
                 // 设置 WHERE 子句
                 if (plainSelect.getWhere() != null) {
@@ -337,7 +335,7 @@ public class Parser {
             tokenizer.pop();
             String tmp2 = tokenizer.peek();
             if ("read".equals(tmp2)) {
-                begin.isRepeatableRead = true;
+                begin.isolationLevel = IsolationLevel.REPEATABLE_READ;
                 tokenizer.pop();
                 if (!"".equals(tokenizer.peek())) {
                     throw Error.InvalidCommandException;
