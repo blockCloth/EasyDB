@@ -13,11 +13,13 @@ public class Transaction {
     public Map<Long, Boolean> snapshot;
     public Exception err;
     public boolean autoAborted;
+    public long startTime; // 添加开始时间属性
 
     public static Transaction newTransaction(long xid, IsolationLevel isolationLevel, Map<Long, Transaction> active) {
         Transaction t = new Transaction();
         t.xid = xid;
         t.isolationLevel = isolationLevel;
+        t.startTime = System.currentTimeMillis();
         if(isolationLevel != IsolationLevel.READ_COMMITTED) {
             t.snapshot = new HashMap<>();
             for(Long x : active.keySet()) {

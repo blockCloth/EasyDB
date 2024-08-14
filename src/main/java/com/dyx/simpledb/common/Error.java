@@ -18,6 +18,7 @@ public class Error {
 
     // vm
     public static final Exception DeadlockException = new RuntimeException("Deadlock!");
+    public static final Exception TimeoutException = new RuntimeException("Lock wait timeout exceeded; try restarting transaction");
     public static final Exception ConcurrentUpdateException = new RuntimeException("Concurrent update issue!");
     public static final Exception NullEntryException = new RuntimeException("Null entry!");
 

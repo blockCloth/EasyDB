@@ -307,31 +307,39 @@ public class Parser {
         if ("".equals(isolation)) {
             return begin;
         }
-        if (!"isolation".equals(isolation)) {
+        if (!"isolation".equalsIgnoreCase(isolation)) {
             throw Error.InvalidCommandException;
         }
 
         tokenizer.pop();
         String level = tokenizer.peek();
-        if (!"level".equals(level)) {
+        if (!"level".equalsIgnoreCase(level)) {
             throw Error.InvalidCommandException;
         }
         tokenizer.pop();
 
         String tmp1 = tokenizer.peek();
-        if ("read".equals(tmp1)) {
+        if ("read".equalsIgnoreCase(tmp1)) {
             tokenizer.pop();
             String tmp2 = tokenizer.peek();
-            if ("committed".equals(tmp2)) {
+            if ("committed".equalsIgnoreCase(tmp2)) {
                 tokenizer.pop();
                 if (!"".equals(tokenizer.peek())) {
                     throw Error.InvalidCommandException;
                 }
+                begin.isolationLevel = IsolationLevel.READ_COMMITTED;
+                return begin;
+            } else if ("uncommitted".equalsIgnoreCase(tmp2)) {
+                tokenizer.pop();
+                if (!"".equals(tokenizer.peek())) {
+                    throw Error.InvalidCommandException;
+                }
+                begin.isolationLevel = IsolationLevel.READ_UNCOMMITTED;
                 return begin;
             } else {
                 throw Error.InvalidCommandException;
             }
-        } else if ("repeatable".equals(tmp1)) {
+        } else if ("repeatable".equalsIgnoreCase(tmp1)) {
             tokenizer.pop();
             String tmp2 = tokenizer.peek();
             if ("read".equals(tmp2)) {
@@ -344,10 +352,18 @@ public class Parser {
             } else {
                 throw Error.InvalidCommandException;
             }
+        } else if ("serializable".equalsIgnoreCase(tmp1)) {
+            tokenizer.pop();
+            if (!"".equals(tokenizer.peek())) {
+                throw Error.InvalidCommandException;
+            }
+            begin.isolationLevel = IsolationLevel.SERIALIZABLE;
+            return begin;
         } else {
             throw Error.InvalidCommandException;
         }
     }
+
 
     private static boolean isName(String name) {
         return name.matches("[A-Za-z_][A-Za-z0-9_]*");

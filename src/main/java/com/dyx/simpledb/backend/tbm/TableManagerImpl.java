@@ -11,6 +11,7 @@ import com.dyx.simpledb.backend.dm.DataManager;
 import com.dyx.simpledb.backend.parser.statement.*;
 import com.dyx.simpledb.backend.parser.statement.DeleteObj;
 import com.dyx.simpledb.backend.utils.Parser;
+import com.dyx.simpledb.backend.vm.IsolationLevel;
 import com.dyx.simpledb.backend.vm.VersionManager;
 import com.dyx.simpledb.common.Error;
 
@@ -54,8 +55,8 @@ public class TableManagerImpl implements TableManager {
     @Override
     public BeginRes begin(Begin begin) {
         BeginRes res = new BeginRes();
-        int level = begin.isRepeatableRead?1:0;
-        res.xid = vm.begin(level);
+        IsolationLevel isolationLevel = begin.isolationLevel;
+        res.xid = vm.begin(isolationLevel);
         res.result = "begin".getBytes();
         return res;
     }
