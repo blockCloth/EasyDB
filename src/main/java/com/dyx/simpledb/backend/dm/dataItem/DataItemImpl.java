@@ -16,9 +16,9 @@ import com.dyx.simpledb.backend.dm.page.Page;
  */
 public class DataItemImpl implements DataItem {
 
-    static final int OF_VALID = 0;
-    static final int OF_SIZE = 1;
-    static final int OF_DATA = 3;
+    public static final int OF_VALID = 0;
+    public static final int OF_SIZE = 1;
+    public static final int OF_DATA = 3;
 
     private SubArray raw;
     private byte[] oldRaw;

@@ -16,7 +16,7 @@ public class Visibility {
         }else if (t.isolationLevel == IsolationLevel.SERIALIZABLE){
             return tm.isCommitted(xmax) && (xmax > t.xid || t.isInSnapshot(xmax));
         }else {
-            throw new IllegalArgumentException("Unknown isolation level: " + t.level);
+            throw new IllegalArgumentException("Unknown isolation level: " + t.isolationLevel);
         }
     }
 

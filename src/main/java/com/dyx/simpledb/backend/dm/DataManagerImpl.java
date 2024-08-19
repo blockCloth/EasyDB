@@ -12,8 +12,11 @@ import com.dyx.simpledb.backend.dm.pageIndex.PageIndex;
 import com.dyx.simpledb.backend.dm.pageIndex.PageInfo;
 import com.dyx.simpledb.backend.tm.TransactionManager;
 import com.dyx.simpledb.backend.utils.Panic;
+import com.dyx.simpledb.backend.utils.Parser;
 import com.dyx.simpledb.backend.utils.Types;
 import com.dyx.simpledb.common.Error;
+
+import java.util.Arrays;
 
 public class DataManagerImpl extends AbstractCache<DataItem> implements DataManager {
 
@@ -92,6 +95,35 @@ public class DataManagerImpl extends AbstractCache<DataItem> implements DataMana
         PageOne.setVcClose(pageOne);
         pageOne.release();
         pc.close();
+    }
+
+    @Override
+    public void physicalDelete(Long uid) throws Exception {
+        // 解析出页号和偏移量
+        short offset = (short) (uid & ((1L << 16) - 1));
+        uid >>>= 32;
+        int pgno = (int) (uid & ((1L << 32) - 1));
+
+        // 获取目标页
+        Page pg = pc.getPage(pgno);
+        try {
+            // 获取页中的数据
+            byte[] data = pg.getData();
+
+            // 计算数据项的大小
+            short size = Parser.parseShort(Arrays.copyOfRange(data, offset + DataItemImpl.OF_SIZE, offset + DataItemImpl.OF_DATA));
+            int dataItemLength = DataItemImpl.OF_DATA + size;
+
+            // 清除数据项的内容（将数据项所在区域的字节清零）
+            Arrays.fill(data, offset, offset + dataItemLength, (byte) 0);
+
+            // 更新该页的可用空间信息
+            pIndex.add(pgno, PageX.getFreeSpace(pg));
+
+        } finally {
+            // 释放页
+            pg.release();
+        }
     }
 
     // 为xid生成update日志

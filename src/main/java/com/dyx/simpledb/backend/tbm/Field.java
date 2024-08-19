@@ -33,19 +33,20 @@ public class Field {
     private BPlusTree bt;
     Object defaultValue;
     boolean isAutoIncrement;
-    //增加非空约束
+    // 增加非空约束
     boolean isNotNull;
     // 定义主键自增行为
     AtomicInteger atomicInteger = new AtomicInteger(0);
     // 唯一约束
     boolean isUnique;
-    //定义一个集合，存储元素
+    // 定义一个集合，存储元素
     Set<Object> uniqueValues;
+    boolean isPrimaryKey;
 
     public static Field loadField(Table tb, long uid) {
         byte[] raw = null;
         try {
-            raw = ((TableManagerImpl)tb.tbm).vm.read(TransactionManagerImpl.SUPER_XID, uid);
+            raw = ((TableManagerImpl) tb.tbm).vm.read(TransactionManagerImpl.SUPER_XID, uid);
         } catch (Exception e) {
             Panic.panic(e);
         }
@@ -59,7 +60,7 @@ public class Field {
     }
 
     public Field(Table tb, String fieldName, String fieldType, long index,
-                 boolean isAutoIncrement,boolean isNotNull,boolean isUnique) {
+                 boolean isAutoIncrement, boolean isNotNull, boolean isUnique,boolean isPrimaryKey) {
         this.tb = tb;
         this.fieldName = fieldName;
         this.fieldType = fieldType;
@@ -68,12 +69,13 @@ public class Field {
         this.isAutoIncrement = isAutoIncrement;
         this.isNotNull = isNotNull;
         this.isUnique = isUnique;
-        if (isUnique){
+        if (isUnique) {
             uniqueValues = new HashSet<>();
         }
+        this.isPrimaryKey = isPrimaryKey;
     }
 
-    private Object getDefaultValue(String fieldType){
+    private Object getDefaultValue(String fieldType) {
         Types.SupportedType type = Types.SupportedType.fromTypeName(fieldType);
         return type.getDefaultValue();
     }
@@ -86,11 +88,11 @@ public class Field {
         res = Parser.parseString(Arrays.copyOfRange(raw, position, raw.length));
         fieldType = res.str;
         position += res.next;
-        this.index = Parser.parseLong(Arrays.copyOfRange(raw, position, position+8));
-        if(index != 0) {
+        this.index = Parser.parseLong(Arrays.copyOfRange(raw, position, position + 8));
+        if (index != 0) {
             try {
-                bt = BPlusTree.load(index, ((TableManagerImpl)tb.tbm).dm);
-            } catch(Exception e) {
+                bt = BPlusTree.load(index, ((TableManagerImpl) tb.tbm).dm);
+            } catch (Exception e) {
                 Panic.panic(e);
             }
         }
@@ -99,23 +101,25 @@ public class Field {
 
     /**
      * 创建字段信息
-     * @param tb 表
-     * @param xid 事务ID
-     * @param fieldName 字段名
-     * @param fieldType 字段类型
-     * @param indexed 是否为索引
+     *
+     * @param tb              表
+     * @param xid             事务ID
+     * @param fieldName       字段名
+     * @param fieldType       字段类型
+     * @param indexed         是否为索引
      * @param isAutoIncrement 是否自增
-     * @param isNotNull 非空约束
-     * @param isUnique 唯一约束
+     * @param isNotNull       非空约束
+     * @param isUnique        唯一约束
      */
     public static Field createField(Table tb, long xid, String fieldName,
                                     String fieldType, boolean indexed,
-                                    boolean isAutoIncrement,boolean isNotNull,boolean isUnique) throws Exception {
+                                    boolean isAutoIncrement, boolean isNotNull, boolean isUnique,
+                                    boolean isPrimaryKey) throws Exception {
         typeCheck(fieldType);
-        Field f = new Field(tb, fieldName, fieldType, 0,isAutoIncrement,isNotNull,isUnique);
-        if(indexed) {
-            long index = BPlusTree.create(((TableManagerImpl)tb.tbm).dm);
-            BPlusTree bt = BPlusTree.load(index, ((TableManagerImpl)tb.tbm).dm);
+        Field f = new Field(tb, fieldName, fieldType, 0, isAutoIncrement, isNotNull, isUnique,isPrimaryKey);
+        if (indexed) {
+            long index = BPlusTree.create(((TableManagerImpl) tb.tbm).dm);
+            BPlusTree bt = BPlusTree.load(index, ((TableManagerImpl) tb.tbm).dm);
             f.index = index;
             f.bt = bt;
         }
@@ -127,7 +131,7 @@ public class Field {
         byte[] nameRaw = Parser.string2Byte(fieldName);
         byte[] typeRaw = Parser.string2Byte(fieldType);
         byte[] indexRaw = Parser.long2Byte(index);
-        this.uid = ((TableManagerImpl)tb.tbm).vm.insert(xid, Bytes.concat(nameRaw, typeRaw, indexRaw));
+        this.uid = ((TableManagerImpl) tb.tbm).vm.insert(xid, Bytes.concat(nameRaw, typeRaw, indexRaw));
     }
 
     private static void typeCheck(String fieldType) throws Exception {
@@ -225,24 +229,24 @@ public class Field {
     @Override
     public String toString() {
         return new StringBuilder("(")
-            .append(fieldName)
-            .append(", ")
-            .append(fieldType)
-            .append(index!=0?", Index":", NoIndex")
-            .append(")")
-            .toString();
+                .append(fieldName)
+                .append(", ")
+                .append(fieldType)
+                .append(index != 0 ? ", Index" : ", NoIndex")
+                .append(")")
+                .toString();
     }
 
     public FieldCalRes calExp(SingleExpression exp) throws Exception {
         Object v = null;
         FieldCalRes res = new FieldCalRes();
-        switch(exp.compareOp) {
+        switch (exp.compareOp) {
             case "<":
                 res.left = 0;
                 v = string2Value(exp.value);
                 res.right = value2Uid(v);
-                if(res.right > 0) {
-                    res.right --;
+                if (res.right > 0) {
+                    res.right--;
                 }
                 break;
             case "=":
@@ -257,5 +261,17 @@ public class Field {
                 break;
         }
         return res;
+    }
+
+    public String printConstraint() {
+        StringBuilder sb = new StringBuilder();
+        if (isPrimaryKey){
+            sb.append("PrimaryKey  ");
+        }else {
+            sb.append(isNotNull ? "NotNull  " : "");
+            sb.append(isUnique ? "Unique  " : "");
+        }
+        sb.append(isAutoIncrement ? "AutoIncr  " : "");
+        return sb.toString();
     }
 }

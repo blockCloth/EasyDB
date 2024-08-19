@@ -63,7 +63,7 @@ public class Executor {
         try {
             byte[] res = null;
             if(Show.class.isInstance(stat)) {
-                res = tbm.show(xid);
+                res = tbm.show(xid,(Show)stat);
             } else if(Create.class.isInstance(stat)) {
                 res = tbm.create(xid, (Create)stat);
             } else if(SelectObj.class.isInstance(stat)) {
@@ -74,6 +74,8 @@ public class Executor {
                 res = tbm.delete(xid, (DeleteObj)stat);
             } else if(UpdateObj.class.isInstance(stat)) {
                 res = tbm.update(xid, (UpdateObj)stat);
+            }else if(DropObj.class.isInstance(stat)) {
+                res = tbm.drop(xid, (DropObj)stat);
             }
             return res;
         } catch(Exception e1) {

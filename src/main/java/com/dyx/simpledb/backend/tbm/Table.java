@@ -5,15 +5,12 @@ import java.util.stream.Collectors;
 
 import cn.hutool.core.util.StrUtil;
 import com.dyx.simpledb.backend.parser.statement.*;
-import com.dyx.simpledb.backend.utils.Types;
+import com.dyx.simpledb.backend.utils.*;
 import com.google.common.primitives.Bytes;
 
 import com.dyx.simpledb.backend.parser.statement.DeleteObj;
 import com.dyx.simpledb.backend.tbm.Field.ParseValueRes;
 import com.dyx.simpledb.backend.tm.TransactionManagerImpl;
-import com.dyx.simpledb.backend.utils.Panic;
-import com.dyx.simpledb.backend.utils.ParseStringRes;
-import com.dyx.simpledb.backend.utils.Parser;
 import com.dyx.simpledb.common.Error;
 
 /**
@@ -83,11 +80,12 @@ public class Table {
                 hideIndex = true;
             }
 
-            tb.fields.add(Field.createField(tb, xid, fieldName, fieldType, indexed, isAutoIncrement, isNotNull, isUnique));
+            tb.fields.add(Field.createField(tb, xid, fieldName, fieldType, indexed, isAutoIncrement, isNotNull, isUnique, isPrimaryKey));
         }
 
         if (!hideIndex) {
-            tb.fields.add(Field.createField(tb, xid, GEN_CLUST_INDEX, "int", true, true, true, true));
+            // 创建自增的隐藏字段
+            tb.fields.add(Field.createField(tb, xid, GEN_CLUST_INDEX, "int", true, true, true, true, false));
             autoIncrementFields.add(GEN_CLUST_INDEX);
         }
 
@@ -122,7 +120,7 @@ public class Table {
         return this;
     }
 
-    private Table persistSelf(long xid) throws Exception {
+    public Table persistSelf(long xid) throws Exception {
         byte[] nameRaw = Parser.string2Byte(name);
         byte[] nextRaw = Parser.long2Byte(nextUid);
         byte[] fieldRaw = new byte[0];
@@ -248,6 +246,25 @@ public class Table {
         }
         // 更新唯一值集合
         updateUniqueValues(entry);
+    }
+
+    public void drop(long xid) throws Exception {
+        // 先删除表中所有数据
+        List<Long> allUid = getAllUid();
+        for (Long uid : allUid) {
+            // 先逻辑删除，确保无事务引用
+            ((TableManagerImpl) tbm).vm.delete(xid, uid);
+        }
+        for (Long uid : allUid) {
+            // 再物理删除
+            ((TableManagerImpl) tbm).vm.physicalDelete(xid, uid);
+        }
+        // 4. 删除表的字段和索引元数据
+        for (Field field : fields) {
+            ((TableManagerImpl) tbm).vm.physicalDelete(xid,field.uid); // 物理删除字段元数据
+        }
+        // 5. 删除表的自身元数据
+        ((TableManagerImpl) tbm).vm.physicalDelete(xid,this.uid); // 物理删除表元数据
     }
 
     private void updateUniqueValues(Map<String, Object> entry) {
@@ -525,75 +542,8 @@ public class Table {
     private String printEntries(List<Map<String, Object>> entries, String[] selectedFields) {
         if (entries == null || entries.isEmpty()) return "";
 
-        Map<String, Integer> columnWidths = calculateColumnWidths(entries, selectedFields);
-
-        StringBuilder sb = new StringBuilder();
-
-        printSeparator(sb, columnWidths, selectedFields);
-        printColumnNames(sb, columnWidths, selectedFields);
-        printSeparator(sb, columnWidths, selectedFields);
-        printData(sb, columnWidths, selectedFields, entries);
-        printSeparator(sb, columnWidths, selectedFields);
-
-
-        return sb.toString().endsWith("\n")
-                ? sb.toString().substring(0, sb.toString().length() - 1)
-                : sb.toString();
+        return PrintUtil.printTable(selectedFields, entries);
     }
-
-    private Map<String, Integer> calculateColumnWidths(List<Map<String, Object>> entries, String[] selectedFields) {
-        Map<String, Integer> columnWidths = new HashMap<>();
-        for (String col : selectedFields) {
-            int maxLength = col.length();
-            for (Map<String, Object> entry : entries) {
-                String value = entry.get(col) != null ? entry.get(col).toString() : "NULL";
-                if (value.length() > maxLength) {
-                    maxLength = value.length();
-                }
-            }
-            columnWidths.put(col, maxLength);
-        }
-        return columnWidths;
-    }
-
-    private void printSeparator(StringBuilder sb, Map<String, Integer> columnWidths, String[] selectedFields) {
-        sb.append("+");
-        for (String col : selectedFields) {
-            int width = columnWidths.get(col);
-            sb.append(repeat("-", width)).append("+");
-        }
-        sb.append("\n");
-    }
-
-    private void printColumnNames(StringBuilder sb, Map<String, Integer> columnWidths, String[] selectedFields) {
-        sb.append("|");
-        for (String col : selectedFields) {
-            int width = columnWidths.get(col);
-            sb.append(String.format("%-" + width + "s|", col));
-        }
-        sb.append("\n");
-    }
-
-    private void printData(StringBuilder sb, Map<String, Integer> columnWidths, String[] selectedFields, List<Map<String, Object>> entries) {
-        for (Map<String, Object> entry : entries) {
-            sb.append("|");
-            for (String col : selectedFields) {
-                String value = entry.get(col) != null ? entry.get(col).toString() : "NULL";
-                int width = columnWidths.get(col);
-                sb.append(String.format("%-" + width + "s|", value));
-            }
-            sb.append("\n");
-        }
-    }
-
-    public static String repeat(String str, int times) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < times; i++) {
-            sb.append(str);
-        }
-        return sb.toString();
-    }
-
 
     private Map<String, Object> parseEntry(byte[] raw) {
         int pos = 0;

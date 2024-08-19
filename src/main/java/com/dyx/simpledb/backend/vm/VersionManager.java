@@ -15,5 +15,6 @@ public interface VersionManager {
     public static VersionManager newVersionManager(TransactionManager tm, DataManager dm) {
         return new VersionManagerImpl(tm, dm);
     }
+    void physicalDelete(long xid, Long uid) throws Exception;
 
 }

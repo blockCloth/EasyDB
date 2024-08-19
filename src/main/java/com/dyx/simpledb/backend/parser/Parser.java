@@ -11,6 +11,7 @@ import net.sf.jsqlparser.JSQLParserException;
 import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
 import net.sf.jsqlparser.expression.operators.relational.ItemsListVisitorAdapter;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
+import net.sf.jsqlparser.statement.ShowStatement;
 import net.sf.jsqlparser.statement.Statement;
 import net.sf.jsqlparser.statement.create.table.ColumnDefinition;
 import net.sf.jsqlparser.statement.create.table.CreateTable;
@@ -55,6 +56,8 @@ public class Parser {
             return parseDelete((Delete) parsedStatement);
         } else if (parsedStatement instanceof Drop) {
             return parseDrop((Drop) parsedStatement);
+        }else if (parsedStatement instanceof ShowStatement) {
+            return parseShow((ShowStatement) parsedStatement);
         } else {
             throw new RuntimeException("Unsupported statement: " + sql);
         }
@@ -106,13 +109,14 @@ public class Parser {
         return read;
     }
 
-
-    private static Show parseShow(Tokenizer tokenizer) throws Exception {
-        String tmp = tokenizer.peek();
-        if ("".equals(tmp)) {
-            return new Show();
+    private static Show parseShow(ShowStatement showStatement) throws Exception {
+       Show show = new Show();
+        String name = showStatement.getName();
+        if (name.equalsIgnoreCase("table")){
+            show.isTable = true;
         }
-        throw Error.InvalidCommandException;
+        show.tableName = name;
+       return show;
     }
 
     private static UpdateObj parseUpdate(Update updateStmt) {
@@ -285,7 +289,9 @@ public class Parser {
 
     private static DropObj parseDrop(Drop dropStmt) {
         DropObj dropObj = new DropObj();
-        dropObj.tableName = dropStmt.getName().getName();
+        if (dropStmt.getType().equalsIgnoreCase("table")){
+            dropObj.tableName = dropStmt.getName().getName();
+        }
         return dropObj;
     }
 
@@ -305,6 +311,7 @@ public class Parser {
         String isolation = tokenizer.peek();
         Begin begin = new Begin();
         if ("".equals(isolation)) {
+            begin.isolationLevel = IsolationLevel.READ_COMMITTED;
             return begin;
         }
         if (!"isolation".equalsIgnoreCase(isolation)) {

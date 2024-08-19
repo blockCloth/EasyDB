@@ -14,7 +14,10 @@ public class LockTable {
     private Map<Long, Lock> waitLock;   // 正在等待资源的XID的锁
     private Map<Long, Long> waitU;      // XID正在等待的UID
     private Lock lock;
-    // private static final int DEADLOCK_DETECTION_THRESHOLD = 5; // 设置死锁检查阈值
+    private Map<Long, Long> waitStartTime;  // 记录每个XID进入等待状态的时间
+    private static final int CHECK_INTERVAL_MS = 1000; // 检查间隔（0.6秒）
+    private static final int TIMEOUT_THRESHOLD_MS = 30000; // 超时时间阈值（30秒）
+
 
     public LockTable() {
         x2u = new HashMap<>();
@@ -23,6 +26,8 @@ public class LockTable {
         waitLock = new HashMap<>();
         waitU = new HashMap<>();
         lock = new ReentrantLock();
+        waitStartTime = new HashMap<>();
+        startTimeoutDeadlockChecker();
     }
 
     // 尝试获取资源，如需等待则检测死锁并处理
@@ -39,15 +44,14 @@ public class LockTable {
             }
             waitU.put(xid, uid); // 资源被占用，进入等待
             putIntoList(wait, uid, xid);
+            waitStartTime.put(xid, System.currentTimeMillis());
 
             // 仅在等待链长度达到阈值时才触发死锁检测
-            // if (wait.get(uid).size() >= DEADLOCK_DETECTION_THRESHOLD) {
-                if (hasDeadLock()) {
-                    waitU.remove(xid);
-                    removeFromList(wait, uid, xid);
-                    throw Error.DeadlockException;
-                }
-            // }
+            if (hasDeadLock()) {
+                waitU.remove(xid);
+                removeFromList(wait, uid, xid);
+                throw Error.DeadlockException;
+            }
 
             Lock l = new ReentrantLock();
             l.lock();
@@ -181,5 +185,61 @@ public class LockTable {
         }
         return false;
     }
+
+    private void startTimeoutDeadlockChecker() {
+        new Thread(() -> {
+            while (true) {
+                try {
+                    Thread.sleep(CHECK_INTERVAL_MS);
+                    checkForTimeouts(TIMEOUT_THRESHOLD_MS);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        }).start();
+    }
+
+    public void checkForTimeouts(long timeout) {
+        lock.lock();
+        try {
+            long currentTime = System.currentTimeMillis();
+            Iterator<Map.Entry<Long, Long>> iterator = waitStartTime.entrySet().iterator();
+            while (iterator.hasNext()) {
+                Map.Entry<Long, Long> entry = iterator.next();
+                long xid = entry.getKey();
+                long startTime = entry.getValue();
+                if (currentTime - startTime >= timeout) {
+                    // 超时，执行回滚操作
+                    rollbackTimeoutTransaction(xid);
+                    iterator.remove();  // 从等待时间记录中移除
+                }
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private void rollbackTimeoutTransaction(long xid) {
+        System.out.println("Transaction " + xid + " has timed out and will be rolled back.");
+
+        // 解除事务等待的资源
+        Long uid = waitU.remove(xid);
+        if (uid != null) {
+            removeFromList(wait, uid, xid);
+        }
+        // 释放所有已占用资源
+        List<Long> resources = x2u.remove(xid);
+        if (resources != null) {
+            for (Long resource : resources) {
+                selectNewXID(resource);
+            }
+        }
+        // 通知等待该事务的其他线程
+        Lock l = waitLock.remove(xid);
+        if (l != null && ((ReentrantLock) l).isHeldByCurrentThread()) {
+            l.unlock();
+        }
+    }
+
 
 }

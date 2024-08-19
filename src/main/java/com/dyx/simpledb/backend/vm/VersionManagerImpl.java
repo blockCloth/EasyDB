@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -21,76 +23,16 @@ public class VersionManagerImpl extends AbstractCache<Entry> implements VersionM
     Map<Long, Transaction> activeTransaction;
     Lock lock;
     LockTable lt;
-    private final Lock globalLock;
-    private static final int CHECK_INTERVAL_MS = 600; // 检查间隔（0.6秒）
-    private static final int TIMEOUT_THRESHOLD_MS = 10000; // 超时时间阈值（10秒）
+    private final Lock globalLock = new ReentrantLock();
 
     public VersionManagerImpl(TransactionManager tm, DataManager dm) {
         super(0);
         this.tm = tm;
         this.dm = dm;
-        this.activeTransaction = new HashMap<>();
+        this.activeTransaction = new ConcurrentHashMap<>();
         activeTransaction.put(TransactionManagerImpl.SUPER_XID, Transaction.newTransaction(TransactionManagerImpl.SUPER_XID, IsolationLevel.READ_COMMITTED, null));
         this.lock = new ReentrantLock();
         this.lt = new LockTable();
-        this.globalLock = new ReentrantLock();
-        // 启动超时和死锁检查线程
-        startTimeoutDeadlockChecker();
-    }
-
-    // 启动后台线程来定期检查事务超时和死锁
-    private void startTimeoutDeadlockChecker() {
-        new Thread(() -> {
-            while (true) {
-                try {
-                    Thread.sleep(CHECK_INTERVAL_MS);
-                    checkForTimeouts();
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
-            }
-        }).start();
-    }
-
-    // 检查超时和死锁
-    private void checkForTimeouts() {
-        long now = System.currentTimeMillis();
-        List<Long> toRollback = new ArrayList<>();
-
-        lock.lock();
-        try {
-            for (Map.Entry<Long, Transaction> entry : activeTransaction.entrySet()) {
-                long xid = entry.getKey();
-                Transaction tx = entry.getValue();
-
-                // 超时检测逻辑
-                if (now - tx.startTime > TIMEOUT_THRESHOLD_MS) {
-                    toRollback.add(xid); // 将需要回滚的事务ID加入列表
-                }
-            }
-        } finally {
-            lock.unlock();
-        }
-
-        for (Long xid : toRollback) {
-            abortTransaction(xid);
-        }
-    }
-
-    // 回滚事务
-    private void abortTransaction(long xid) {
-        lock.lock();
-        try {
-            Transaction tx = activeTransaction.get(xid);
-            if (tx != null) {
-                lt.remove(xid); // 从锁表中移除相关锁
-                tm.abort(xid);  // 通过事务管理器回滚事务
-                activeTransaction.remove(xid); // 从活跃事务列表中移除
-                System.out.println("Transaction " + xid + " has been automatically rolled back due to timeout or deadlock.");
-            }
-        } finally {
-            lock.unlock();
-        }
     }
 
     @Override
@@ -99,22 +41,22 @@ public class VersionManagerImpl extends AbstractCache<Entry> implements VersionM
         Transaction t = activeTransaction.get(xid);
         lock.unlock();
 
-        if(t.err != null) {
+        if (t.err != null) {
             throw t.err;
         }
 
         Entry entry = null;
         try {
             entry = super.get(uid);
-        } catch(Exception e) {
-            if(e == Error.NullEntryException) {
+        } catch (Exception e) {
+            if (e == Error.NullEntryException) {
                 return null;
             } else {
                 throw e;
             }
         }
         try {
-            if(Visibility.isVisible(tm, t, entry)) {
+            if (Visibility.isVisible(tm, t, entry)) {
                 return entry.data();
             } else {
                 return null;
@@ -130,7 +72,7 @@ public class VersionManagerImpl extends AbstractCache<Entry> implements VersionM
         Transaction t = activeTransaction.get(xid);
         lock.unlock();
 
-        if(t.err != null) {
+        if (t.err != null) {
             throw t.err;
         }
 
@@ -139,47 +81,61 @@ public class VersionManagerImpl extends AbstractCache<Entry> implements VersionM
     }
 
     @Override
+    public void physicalDelete(long xid, Long uid) throws Exception {
+        lock.lock();
+        Transaction t = activeTransaction.get(xid);
+        lock.unlock();
+
+        if (t.err != null) {
+            throw t.err;
+        }
+        dm.physicalDelete(uid);
+
+        super.release(uid);
+    }
+
+    @Override
     public boolean delete(long xid, long uid) throws Exception {
         lock.lock();
         Transaction t = activeTransaction.get(xid);
         lock.unlock();
 
-        if(t.err != null) {
+        if (t.err != null) {
             throw t.err;
         }
         Entry entry = null;
         try {
             entry = super.get(uid);
-        } catch(Exception e) {
-            if(e == Error.NullEntryException) {
+        } catch (Exception e) {
+            if (e == Error.NullEntryException) {
                 return false;
             } else {
                 throw e;
             }
         }
         try {
-            if(!Visibility.isVisible(tm, t, entry)) {
+            if (!Visibility.isVisible(tm, t, entry)) {
                 return false;
             }
             Lock l = null;
             try {
                 l = lt.add(xid, uid);
-            } catch(Exception e) {
+            } catch (Exception e) {
                 t.err = Error.ConcurrentUpdateException;
                 internAbort(xid, true);
                 t.autoAborted = true;
                 throw t.err;
             }
-            if(l != null) {
+            if (l != null) {
                 l.lock();
                 l.unlock();
             }
 
-            if(entry.getXmax() == xid) {
+            if (entry.getXmax() == xid) {
                 return false;
             }
 
-            if(Visibility.isVersionSkip(tm, t, entry)) {
+            if (Visibility.isVersionSkip(tm, t, entry)) {
                 t.err = Error.ConcurrentUpdateException;
                 internAbort(xid, true);
                 t.autoAborted = true;
@@ -196,15 +152,17 @@ public class VersionManagerImpl extends AbstractCache<Entry> implements VersionM
 
     @Override
     public long begin(IsolationLevel isolationLevel) {
+        globalLock.lock(); // 获取全局锁
         lock.lock();
         try {
+            if (isolationLevel != IsolationLevel.SERIALIZABLE) {
+                globalLock.unlock(); // 解除非全局锁
+            }
             long xid = tm.begin();
-            Transaction t = Transaction.newTransaction(xid, isolationLevel, activeTransaction);
+            Transaction t = Transaction.newTransaction(
+                    xid, isolationLevel == null ? IsolationLevel.READ_COMMITTED : isolationLevel, activeTransaction);
             activeTransaction.put(xid, t);
 
-            if (isolationLevel == IsolationLevel.SERIALIZABLE){
-                globalLock.lock();
-            }
             return xid;
         } finally {
             lock.unlock();
@@ -218,10 +176,10 @@ public class VersionManagerImpl extends AbstractCache<Entry> implements VersionM
         lock.unlock();
 
         try {
-            if(t.err != null) {
+            if (t.err != null) {
                 throw t.err;
             }
-        } catch(NullPointerException n) {
+        } catch (NullPointerException n) {
             System.out.println(xid);
             System.out.println(activeTransaction.keySet());
             Panic.panic(n);
@@ -231,8 +189,8 @@ public class VersionManagerImpl extends AbstractCache<Entry> implements VersionM
         activeTransaction.remove(xid);
         lock.unlock();
 
-        if (t.isolationLevel == IsolationLevel.SERIALIZABLE){
-            globalLock.unlock();
+        if (t.isolationLevel == IsolationLevel.SERIALIZABLE) {
+            globalLock.unlock();  // 释放全局锁
         }
 
         lt.remove(xid);
@@ -247,15 +205,16 @@ public class VersionManagerImpl extends AbstractCache<Entry> implements VersionM
     private void internAbort(long xid, boolean autoAborted) {
         lock.lock();
         Transaction t = activeTransaction.get(xid);
-        if(!autoAborted) {
+        if (!autoAborted) {
             activeTransaction.remove(xid);
         }
         lock.unlock();
 
-        if (t.isolationLevel == IsolationLevel.SERIALIZABLE){
-            globalLock.unlock();
+        if (t.isolationLevel == IsolationLevel.SERIALIZABLE) {
+            globalLock.unlock();  // 释放全局锁
         }
-        if(t.autoAborted) return;
+
+        if (t.autoAborted) return;
         lt.remove(xid);
         tm.abort(xid);
     }
@@ -267,7 +226,7 @@ public class VersionManagerImpl extends AbstractCache<Entry> implements VersionM
     @Override
     protected Entry getForCache(long uid) throws Exception {
         Entry entry = Entry.loadEntry(this, uid);
-        if(entry == null) {
+        if (entry == null) {
             throw Error.NullEntryException;
         }
         return entry;

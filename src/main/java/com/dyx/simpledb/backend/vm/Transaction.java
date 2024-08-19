@@ -8,7 +8,6 @@ import com.dyx.simpledb.backend.tm.TransactionManagerImpl;
 // vm对一个事务的抽象
 public class Transaction {
     public long xid;
-    public int level;
     public IsolationLevel isolationLevel;
     public Map<Long, Boolean> snapshot;
     public Exception err;
@@ -20,7 +19,7 @@ public class Transaction {
         t.xid = xid;
         t.isolationLevel = isolationLevel;
         t.startTime = System.currentTimeMillis();
-        if(isolationLevel != IsolationLevel.READ_COMMITTED) {
+        if(isolationLevel != IsolationLevel.READ_COMMITTED && isolationLevel != IsolationLevel.READ_UNCOMMITTED) {
             t.snapshot = new HashMap<>();
             for(Long x : active.keySet()) {
                 t.snapshot.put(x, true);

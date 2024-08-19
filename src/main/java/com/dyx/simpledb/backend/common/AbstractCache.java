@@ -87,6 +87,12 @@ public abstract class AbstractCache<T> {
     protected void release(long key) {
         lock.lock();
         try {
+            // 检查 references 中是否包含该 key
+            if (!references.containsKey(key)) {
+                // 如果 references 中不包含该 key，直接返回，不进行释放
+                return;
+            }
+
             int ref = references.get(key)-1;
             if(ref == 0) {
                 T obj = cache.get(key);

@@ -99,4 +99,76 @@ public class LockTableTest {
             log.error("Error in deadlock and timeout test", e);
         }
     }
+
+    @Test
+    public void checkTimeout(){
+        LockTable lockTable = new LockTable();
+
+        // 创建几个模拟的事务ID和资源ID
+        long xid1 = 1L;
+        long xid2 = 2L;
+        long xid3 = 3L;
+        long uid1 = 100L;
+        long uid2 = 200L;
+
+        // 测试1：事务1获取资源1
+        try {
+            Lock lock1 = lockTable.add(xid1, uid1);
+            System.out.println("Transaction " + xid1 + " acquired resource " + uid1);
+            if (lock1 != null) {
+                lock1.unlock();
+            }
+        } catch (Exception e) {
+            System.out.println("Transaction " + xid1 + " failed to acquire resource " + uid1);
+        }
+
+        // 测试2：事务2尝试获取已经被占用的资源1，这将导致它进入等待状态
+        try {
+            Lock lock2 = lockTable.add(xid2, uid1);
+            System.out.println("Transaction " + xid2 + " is waiting to acquire resource " + uid1);
+        } catch (Exception e) {
+            System.out.println("Transaction " + xid2 + " failed to acquire resource " + uid1);
+        }
+
+        // 测试3：事务3获取资源2，不冲突
+        try {
+            Lock lock3 = lockTable.add(xid3, uid2);
+            System.out.println("Transaction " + xid3 + " acquired resource " + uid2);
+            if (lock3 != null) {
+                lock3.unlock();
+            }
+        } catch (Exception e) {
+            System.out.println("Transaction " + xid3 + " failed to acquire resource " + uid2);
+        }
+
+        // 模拟事务2超时的情景，等待时间超过设定的阈值
+        try {
+            Thread.sleep(35000); // 35秒后，事务2应该被回滚，因为它等待超过了30秒的阈值
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+        // 测试4：检查事务2是否超时并被回滚
+        try {
+            lockTable.remove(xid2);
+            System.out.println("Transaction " + xid2 + " has been successfully rolled back due to timeout.");
+        } catch (Exception e) {
+            System.out.println("Failed to roll back transaction " + xid2);
+        }
+
+        // 测试5：事务1释放资源1后，事务2重新获取资源1
+        try {
+            lockTable.remove(xid1); // 释放资源1
+            System.out.println("Transaction " + xid1 + " released resource " + uid1);
+
+            // 事务2应该在此时获取到资源1
+            Lock lock2 = lockTable.add(xid2, uid1);
+            if (lock2 != null) {
+                lock2.unlock();
+                System.out.println("Transaction " + xid2 + " acquired resource " + uid1 + " after xid1 released it.");
+            }
+        } catch (Exception e) {
+            System.out.println("Transaction " + xid2 + " failed to acquire resource " + uid1);
+        }
+    }
 }

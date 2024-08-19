@@ -11,13 +11,15 @@ public interface TableManager {
     byte[] commit(long xid) throws Exception;
     byte[] abort(long xid);
 
-    byte[] show(long xid);
+    byte[] show(long xid, Show stat);
     byte[] create(long xid, Create create) throws Exception;
+    byte[] drop(long xid, DropObj stat) throws Exception;
 
     byte[] insert(long xid, InsertObj insertObj) throws Exception;
     byte[] read(long xid, SelectObj selectObj) throws Exception;
     byte[] update(long xid, UpdateObj updateObj) throws Exception;
     byte[] delete(long xid, DeleteObj deleteObj) throws Exception;
+
     // void close();
 
     public static TableManager create(String path, VersionManager vm, DataManager dm) {
@@ -30,4 +32,5 @@ public interface TableManager {
         Booter booter = Booter.open(path);
         return new TableManagerImpl(vm, dm, booter);
     }
+
 }

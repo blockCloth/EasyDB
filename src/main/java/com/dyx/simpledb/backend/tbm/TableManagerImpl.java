@@ -1,16 +1,15 @@
 package com.dyx.simpledb.backend.tbm;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 import com.dyx.simpledb.backend.dm.DataManager;
 import com.dyx.simpledb.backend.parser.statement.*;
 import com.dyx.simpledb.backend.parser.statement.DeleteObj;
+import com.dyx.simpledb.backend.tm.TransactionManagerImpl;
 import com.dyx.simpledb.backend.utils.Parser;
+import com.dyx.simpledb.backend.utils.PrintUtil;
 import com.dyx.simpledb.backend.vm.IsolationLevel;
 import com.dyx.simpledb.backend.vm.VersionManager;
 import com.dyx.simpledb.common.Error;
@@ -71,24 +70,41 @@ public class TableManagerImpl implements TableManager {
         return "abort".getBytes();
     }
     @Override
-    public byte[] show(long xid) {
+    public byte[] show(long xid, Show stat) {
         lock.lock();
         try {
-            StringBuilder sb = new StringBuilder();
-            for (Table tb : tableCache.values()) {
-                sb.append(tb.toString()).append("\n");
+            List<Map<String,Object>> entries = new ArrayList<>();
+            String[] columns = null;
+            Map<String,Object> columnData = null;
+
+            if (stat.isTable){
+                columns = Arrays.asList("tables").toArray(new String[0]);
+                for (String tableName : tableCache.keySet()) {
+                    columnData = new HashMap<>();
+                    columnData.put("tables",tableName);
+                    entries.add(columnData);
+                }
+                return PrintUtil.printTable(columns,entries).getBytes();
             }
-            List<Table> t = xidTableCache.get(xid);
-            if(t == null) {
-                return "\n".getBytes();
+            if (tableCache.containsKey(stat.tableName)){
+                columns = Arrays.asList("field","fieldType","isIndexed","constraint").toArray(new String[0]);
+                Table table = tableCache.get(stat.tableName);
+                for (Field field : table.fields) {
+                    columnData = new HashMap<>();
+                    columnData.put("field",field.fieldName);
+                    columnData.put("fieldType",field.fieldType);
+                    columnData.put("isIndexed", field.isIndexed() ? "Index" : "NoIndex");
+                    columnData.put("constraint",field.printConstraint());
+                    entries.add(columnData);
+                }
+                return PrintUtil.printTable(columns,entries).getBytes();
+            }else {
+                return "Table not found!".getBytes();
             }
-            for (Table tb : t) {
-                sb.append(tb.toString()).append("\n");
-            }
-            return sb.toString().getBytes();
         } finally {
             lock.unlock();
         }
+
     }
     @Override
     public byte[] create(long xid, Create create) throws Exception {
@@ -109,6 +125,7 @@ public class TableManagerImpl implements TableManager {
             lock.unlock();
         }
     }
+
     @Override
     public byte[] insert(long xid, InsertObj insertObj) throws Exception {
         lock.lock();
@@ -151,6 +168,63 @@ public class TableManagerImpl implements TableManager {
         }
         int count = table.delete(xid, deleteObj);
         return ("delete " + count).getBytes();
+    }
+
+    @Override
+    public byte[] drop(long xid, DropObj stat) throws Exception {
+        lock.lock();
+        Table table = tableCache.get(stat.tableName);
+        if (table == null) {
+            lock.unlock();
+            throw Error.TableNotFoundException;
+        }
+
+        try {
+            // 执行表的删除操作
+            table.drop(xid);
+            // 从 `tableCache` 中移除表
+            tableCache.remove(stat.tableName);
+            // 更新表链中的 `nextUid`
+            updateTableChainAfterDrop(table.uid);
+
+            return ("drop " + stat.tableName).getBytes();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private void updateTableChainAfterDrop(long droppedTableUid) throws Exception {
+        long firstUid = firstTableUid();
+
+        if (firstUid == droppedTableUid) {
+            // 如果删除的是第一个表，更新 Booter 中的 UID
+            long nextUid = tableCache.values().stream()
+                    .filter(t -> t.uid != droppedTableUid)
+                    .map(t -> t.uid)
+                    .findFirst()
+                    .orElse(0L);
+            updateFirstTableUid(nextUid);
+        } else {
+            // 如果删除的不是第一个表，更新前一个表的 nextUid
+            Table previousTable = null;
+            for (Table table : tableCache.values()) {
+                if (table.nextUid == droppedTableUid) {
+                    previousTable = table;
+                    break;
+                }
+            }
+
+            if (previousTable != null) {
+                long nextUid = tableCache.values().stream()
+                        .filter(t -> t.uid != droppedTableUid)
+                        .filter(t -> t.uid > droppedTableUid)
+                        .map(t -> t.uid)
+                        .findFirst()
+                        .orElse(0L);
+                previousTable.nextUid = nextUid;
+                previousTable.persistSelf(TransactionManagerImpl.SUPER_XID); // 保存更改
+            }
+        }
     }
 
 }
