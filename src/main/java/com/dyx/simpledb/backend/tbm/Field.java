@@ -221,11 +221,6 @@ public class Field {
         return res;
     }
 
-    public String printValue(Object v) {
-        Types.SupportedType type = Types.SupportedType.fromTypeName(fieldType);
-        return type.printValue(v);
-    }
-
     @Override
     public String toString() {
         return new StringBuilder("(")

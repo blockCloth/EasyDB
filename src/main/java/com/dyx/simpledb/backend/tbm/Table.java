@@ -185,7 +185,10 @@ public class Table {
 
         // 获取需要输出的列名，实现指定查找
         if (read.fields.length == 1 && read.fields[0].equals("*")) {
-            fieldsToOutput = fields.stream().map(field -> field.fieldName).toArray(String[]::new);
+            fieldsToOutput = fields.stream()
+                    .filter(field -> !field.fieldName.equalsIgnoreCase(GEN_CLUST_INDEX))
+                    .map(field -> field.fieldName)
+                    .toArray(String[]::new);
         } else {
             fieldsToOutput = read.fields;
         }
@@ -201,6 +204,8 @@ public class Table {
             } else {
                 Map<String, Object> filterEntry = new HashMap<>();
                 for (String fieldName : read.fields) {
+                    if (fieldName.equals(GEN_CLUST_INDEX))
+                        continue;
                     if (entry.containsKey(fieldName)) {
                         filterEntry.put(fieldName, entry.get(fieldName));
                     }
@@ -261,10 +266,10 @@ public class Table {
         }
         // 4. 删除表的字段和索引元数据
         for (Field field : fields) {
-            ((TableManagerImpl) tbm).vm.physicalDelete(xid,field.uid); // 物理删除字段元数据
+            ((TableManagerImpl) tbm).vm.physicalDelete(xid, field.uid); // 物理删除字段元数据
         }
         // 5. 删除表的自身元数据
-        ((TableManagerImpl) tbm).vm.physicalDelete(xid,this.uid); // 物理删除表元数据
+        ((TableManagerImpl) tbm).vm.physicalDelete(xid, this.uid); // 物理删除表元数据
     }
 
     private void updateUniqueValues(Map<String, Object> entry) {
@@ -541,7 +546,6 @@ public class Table {
 
     private String printEntries(List<Map<String, Object>> entries, String[] selectedFields) {
         if (entries == null || entries.isEmpty()) return "";
-
         return PrintUtil.printTable(selectedFields, entries);
     }
 

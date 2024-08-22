@@ -1,5 +1,6 @@
 package com.dyx.simpledb.backend.utils;
 
+import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 
 public class Types {
@@ -82,30 +83,39 @@ public class Types {
                 return "NULL";
             }
         },
-        DATE("date") {
+        DATETIME("datetime") {
+            private final DateTimeFormatter fullFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+            private final DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+
             @Override
             public Object parseValue(String str) {
-                return java.time.LocalDate.parse(str);
+                if (str.length() == 10) {
+                    // 如果只有年月日，将时间部分补为 "00:00:00"
+                    return java.time.LocalDateTime.parse(str + " 00:00:00", fullFormatter);
+                } else {
+                    return java.time.LocalDateTime.parse(str, fullFormatter);
+                }
             }
 
             @Override
             public long parseValueUid(Object key) {
-                return ((java.time.LocalDate) key).toEpochDay();
+                return ((java.time.LocalDateTime) key).toEpochSecond(java.time.ZoneOffset.UTC);
             }
 
             @Override
             public byte[] parseValueRaw(Object key) {
-                return Parser.long2Byte(((java.time.LocalDate) key).toEpochDay());
+                return Parser.long2Byte(((java.time.LocalDateTime) key).toEpochSecond(java.time.ZoneOffset.UTC));
             }
 
             @Override
             public String printValue(Object v) {
-                return ((java.time.LocalDate) v).toString();
+                // 使用自定义格式化器来格式化LocalDateTime，去除T字符
+                return ((java.time.LocalDateTime) v).format(fullFormatter);
             }
 
             @Override
             public Object parseValueFromBytes(byte[] raw) {
-                return java.time.LocalDate.ofEpochDay(Parser.parseLong(Arrays.copyOf(raw, 8)));
+                return java.time.LocalDateTime.ofEpochSecond(Parser.parseLong(Arrays.copyOf(raw, 8)), 0, java.time.ZoneOffset.UTC);
             }
 
             @Override
@@ -115,7 +125,7 @@ public class Types {
 
             @Override
             public Object getDefaultValue() {
-                return java.time.LocalDate.ofEpochDay(0);
+                return java.time.LocalDateTime.ofEpochSecond(0, 0, java.time.ZoneOffset.UTC);
             }
         },
         FLOAT("float") {

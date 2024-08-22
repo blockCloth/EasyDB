@@ -29,24 +29,30 @@ public class HttpSessionHandshakeInterceptor implements HandshakeInterceptor {
 
     private String getClientIp(HttpServletRequest request) {
         String clientIp = request.getHeader("X-Forwarded-For");
-        if (clientIp == null || clientIp.isEmpty() || "unknown".equalsIgnoreCase(clientIp)) {
+        if (clientIp != null && !clientIp.isEmpty() && !"unknown".equalsIgnoreCase(clientIp)) {
+            // 多重代理情况下，第一个IP是真实客户端IP
+            clientIp = clientIp.split(",")[0];
+        } else {
             clientIp = request.getHeader("Proxy-Client-IP");
+            if (clientIp == null || clientIp.isEmpty() || "unknown".equalsIgnoreCase(clientIp)) {
+                clientIp = request.getHeader("WL-Proxy-Client-IP");
+            }
+            if (clientIp == null || clientIp.isEmpty() || "unknown".equalsIgnoreCase(clientIp)) {
+                clientIp = request.getHeader("HTTP_CLIENT_IP");
+            }
+            if (clientIp == null || clientIp.isEmpty() || "unknown".equalsIgnoreCase(clientIp)) {
+                clientIp = request.getHeader("HTTP_X_FORWARDED_FOR");
+            }
+            if (clientIp == null || clientIp.isEmpty() || "unknown".equalsIgnoreCase(clientIp)) {
+                clientIp = request.getRemoteAddr();
+            }
         }
-        if (clientIp == null || clientIp.isEmpty() || "unknown".equalsIgnoreCase(clientIp)) {
-            clientIp = request.getHeader("WL-Proxy-Client-IP");
-        }
-        if (clientIp == null || clientIp.isEmpty() || "unknown".equalsIgnoreCase(clientIp)) {
-            clientIp = request.getHeader("HTTP_CLIENT_IP");
-        }
-        if (clientIp == null || clientIp.isEmpty() || "unknown".equalsIgnoreCase(clientIp)) {
-            clientIp = request.getHeader("HTTP_X_FORWARDED_FOR");
-        }
-        if (clientIp == null || clientIp.isEmpty() || "unknown".equalsIgnoreCase(clientIp)) {
-            clientIp = request.getRemoteAddr();
-        }
+
         if ("0:0:0:0:0:0:0:1".equals(clientIp)) {
             clientIp = "127.0.0.1";
         }
+
         return clientIp;
     }
+
 }

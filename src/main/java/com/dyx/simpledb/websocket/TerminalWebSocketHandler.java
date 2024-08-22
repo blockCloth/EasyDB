@@ -9,6 +9,7 @@ import com.dyx.simpledb.backend.vm.VersionManager;
 import com.dyx.simpledb.backend.vm.VersionManagerImpl;
 import com.dyx.simpledb.common.UserManager;
 import com.dyx.simpledb.common.UserSession;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -26,6 +27,7 @@ import java.util.concurrent.Executors;
 
 import static com.dyx.simpledb.backend.Launcher.DEFALUT_MEM;
 
+@Slf4j
 @Component
 public class TerminalWebSocketHandler extends TextWebSocketHandler {
 
@@ -140,6 +142,8 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
     }
 
     private void handleSqlCommand(WebSocketSession session, UserSession userSession, String sessionId, String sql) throws IOException {
+        String clientIp = (String) session.getAttributes().get("clientIp");
+        log.info("User with IP: {}, session ID: {} executed SQL: {}", clientIp, sessionId, sql);
         try {
             Executor executor = userSession.getExecutor(sessionId);
             byte[] execute = executor.execute(sql.getBytes());
