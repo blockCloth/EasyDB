@@ -7,6 +7,11 @@ import com.dyx.simpledb.backend.tm.TransactionManager;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+
 @Setter
 @Getter
 public class UserSession {
@@ -16,12 +21,14 @@ public class UserSession {
     private TableManager tableManager;
     private TransactionManager transactionManager;
     private DataManager dataManager;
-    private Executor executor;
+    private Map<String,Executor> executorMap;
+    private final Set<String> sessionIds = ConcurrentHashMap.newKeySet();
 
     public UserSession(String userId, long startTime) {
         this.userId = userId;
         this.startTime = startTime;
         this.lastAccessedTime = startTime; // 初始化最后访问时间
+        executorMap = new HashMap<>();
     }
 
     public void updateLastAccessedTime() {
@@ -35,5 +42,29 @@ public class UserSession {
         if (transactionManager != null) {
             transactionManager.close();
         }
+    }
+
+    public Executor getExecutor(String sessionId) {
+        return executorMap.get(sessionId);
+    }
+
+    public Executor removeExecutor(String sessionId) {
+        return executorMap.remove(sessionId);
+    }
+
+    public void setExecutor(String sessionId, Executor executor) {
+        executorMap.put(sessionId,executor);
+    }
+
+    public void addSession(String sessionId) {
+        sessionIds.add(sessionId);
+    }
+
+    public void removeSession(String sessionId) {
+        sessionIds.remove(sessionId);
+    }
+
+    public boolean hasActiveSessions() {
+        return !sessionIds.isEmpty();
     }
 }

@@ -41,7 +41,14 @@ public class Parser {
         try {
             parsedStatement = CCJSqlParserUtil.parse(sql);
         } catch (JSQLParserException e) {
-            throw new RuntimeException("Invalid statement: " + sql, e);
+            String message = e.getMessage();
+            String result = null;
+            int startIndex = message.indexOf("Encountered unexpected token:");
+            int endIndex = message.indexOf("\nWas expecting one of:");
+            if (startIndex != -1 && endIndex != -1) {
+                result = message.substring(startIndex, endIndex);
+            }
+            throw new RuntimeException("Invalid statement: " + result == null ?sql :result, e);
         }
 
         if (parsedStatement instanceof CreateTable) {

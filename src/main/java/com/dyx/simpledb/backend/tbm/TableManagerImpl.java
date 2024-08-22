@@ -21,7 +21,8 @@ public class TableManagerImpl implements TableManager {
     private Map<String, Table> tableCache;
     private Map<Long, List<Table>> xidTableCache;
     private Lock lock;
-    
+    private Set<String> prohibitTables;
+
     TableManagerImpl(VersionManager vm, DataManager dm, Booter booter) {
         this.vm = vm;
         this.dm = dm;
@@ -29,12 +30,18 @@ public class TableManagerImpl implements TableManager {
         this.tableCache = new HashMap<>();
         this.xidTableCache = new HashMap<>();
         lock = new ReentrantLock();
+        this.prohibitTables = new HashSet<>();
+        Collections.addAll(this.prohibitTables,
+                "select", "insert", "update", "delete", "create",
+                "drop", "alter", "from", "where", "group", "order", "join",
+                "union", "null", "index", "table", "column", "database"
+                );
         loadTables();
     }
 
     private void loadTables() {
         long uid = firstTableUid();
-        while(uid != 0) {
+        while (uid != 0) {
             Table tb = Table.loadTable(this, uid);
             uid = tb.nextUid;
             tableCache.put(tb.name, tb);
@@ -59,46 +66,49 @@ public class TableManagerImpl implements TableManager {
         res.result = "begin".getBytes();
         return res;
     }
+
     @Override
     public byte[] commit(long xid) throws Exception {
         vm.commit(xid);
         return "commit".getBytes();
     }
+
     @Override
     public byte[] abort(long xid) {
         vm.abort(xid);
         return "abort".getBytes();
     }
+
     @Override
     public byte[] show(long xid, Show stat) {
         lock.lock();
         try {
-            List<Map<String,Object>> entries = new ArrayList<>();
+            List<Map<String, Object>> entries = new ArrayList<>();
             String[] columns = null;
-            Map<String,Object> columnData = null;
+            Map<String, Object> columnData = null;
 
-            if (stat.isTable){
+            if (stat.isTable) {
                 columns = Arrays.asList("tables").toArray(new String[0]);
                 for (String tableName : tableCache.keySet()) {
                     columnData = new HashMap<>();
-                    columnData.put("tables",tableName);
+                    columnData.put("tables", tableName);
                     entries.add(columnData);
                 }
-                return PrintUtil.printTable(columns,entries).getBytes();
+                return PrintUtil.printTable(columns, entries).getBytes();
             }
-            if (tableCache.containsKey(stat.tableName)){
-                columns = Arrays.asList("field","fieldType","isIndexed","constraint").toArray(new String[0]);
+            if (tableCache.containsKey(stat.tableName)) {
+                columns = Arrays.asList("field", "fieldType", "isIndexed", "constraint").toArray(new String[0]);
                 Table table = tableCache.get(stat.tableName);
                 for (Field field : table.fields) {
                     columnData = new HashMap<>();
-                    columnData.put("field",field.fieldName);
-                    columnData.put("fieldType",field.fieldType);
+                    columnData.put("field", field.fieldName);
+                    columnData.put("fieldType", field.fieldType);
                     columnData.put("isIndexed", field.isIndexed() ? "Index" : "NoIndex");
-                    columnData.put("constraint",field.printConstraint());
+                    columnData.put("constraint", field.printConstraint());
                     entries.add(columnData);
                 }
-                return PrintUtil.printTable(columns,entries).getBytes();
-            }else {
+                return PrintUtil.printTable(columns, entries).getBytes();
+            } else {
                 return "Table not found!".getBytes();
             }
         } finally {
@@ -106,17 +116,21 @@ public class TableManagerImpl implements TableManager {
         }
 
     }
+
     @Override
     public byte[] create(long xid, Create create) throws Exception {
         lock.lock();
         try {
-            if(tableCache.containsKey(create.tableName)) {
+            if (prohibitTables.contains(create.tableName)){
+                throw Error.TableNotCreateException;
+            }
+            if (tableCache.containsKey(create.tableName)) {
                 throw Error.DuplicatedTableException;
             }
             Table table = Table.createTable(this, firstTableUid(), xid, create);
             updateFirstTableUid(table.uid);
             tableCache.put(create.tableName, table);
-            if(!xidTableCache.containsKey(xid)) {
+            if (!xidTableCache.containsKey(xid)) {
                 xidTableCache.put(xid, new ArrayList<>());
             }
             xidTableCache.get(xid).add(table);
@@ -131,39 +145,42 @@ public class TableManagerImpl implements TableManager {
         lock.lock();
         Table table = tableCache.get(insertObj.tableName);
         lock.unlock();
-        if(table == null) {
+        if (table == null) {
             throw Error.TableNotFoundException;
         }
         table.insert(xid, insertObj);
         return "insert".getBytes();
     }
+
     @Override
     public byte[] read(long xid, SelectObj read) throws Exception {
         lock.lock();
         Table table = tableCache.get(read.tableName);
         lock.unlock();
-        if(table == null) {
+        if (table == null) {
             throw Error.TableNotFoundException;
         }
         return table.read(xid, read).getBytes();
     }
+
     @Override
     public byte[] update(long xid, UpdateObj updateObj) throws Exception {
         lock.lock();
         Table table = tableCache.get(updateObj.tableName);
         lock.unlock();
-        if(table == null) {
+        if (table == null) {
             throw Error.TableNotFoundException;
         }
         int count = table.update(xid, updateObj);
         return ("update" + count).getBytes();
     }
+
     @Override
     public byte[] delete(long xid, DeleteObj deleteObj) throws Exception {
         lock.lock();
         Table table = tableCache.get(deleteObj.tableName);
         lock.unlock();
-        if(table == null) {
+        if (table == null) {
             throw Error.TableNotFoundException;
         }
         int count = table.delete(xid, deleteObj);
@@ -217,7 +234,7 @@ public class TableManagerImpl implements TableManager {
             if (previousTable != null) {
                 long nextUid = tableCache.values().stream()
                         .filter(t -> t.uid != droppedTableUid)
-                        .filter(t -> t.uid > droppedTableUid)
+                        .filter(t -> t.uid > droppedTableUid)  // 再次使用filter方法过滤出UID大于droppedTableUid的表
                         .map(t -> t.uid)
                         .findFirst()
                         .orElse(0L);

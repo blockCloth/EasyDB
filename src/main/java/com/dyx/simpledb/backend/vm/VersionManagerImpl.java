@@ -25,6 +25,7 @@ public class VersionManagerImpl extends AbstractCache<Entry> implements VersionM
     LockTable lt;
     private final Lock globalLock = new ReentrantLock();
 
+
     public VersionManagerImpl(TransactionManager tm, DataManager dm) {
         super(0);
         this.tm = tm;
@@ -189,12 +190,12 @@ public class VersionManagerImpl extends AbstractCache<Entry> implements VersionM
         activeTransaction.remove(xid);
         lock.unlock();
 
-        if (t.isolationLevel == IsolationLevel.SERIALIZABLE) {
-            globalLock.unlock();  // 释放全局锁
-        }
-
         lt.remove(xid);
         tm.commit(xid);
+
+        if (t.isolationLevel == IsolationLevel.SERIALIZABLE && globalLock.tryLock()) {
+            globalLock.unlock();  // 释放全局锁
+        }
     }
 
     @Override
