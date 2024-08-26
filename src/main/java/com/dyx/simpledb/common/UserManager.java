@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Component
 public class UserManager {
     private static final int MAX_USERS = 20;
-    private static final int SESSION_EXPIRY_CHECK_INTERVAL = 100 * 60 * 1000; // 10 minutes in milliseconds
+    private static final int SESSION_EXPIRY_CHECK_INTERVAL = 10 * 60 * 1000; // 10 minutes in milliseconds
     private static final int MAX_SESSION_DURATION = 2 * 60 * 60 * 1000; // 2 hours in milliseconds
 
     private ConcurrentHashMap<String, UserSession> activeUsers = new ConcurrentHashMap<>();

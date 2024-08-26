@@ -589,22 +589,37 @@ public class Table {
 
     private boolean checkColumn(Where where) throws Exception {
         if (where == null) return true;
-        if (where.singleExp1 != null && where.singleExp1.field != null){
+
+        // 检查 singleExp1 字段
+        if (where.singleExp1 != null && where.singleExp1.field != null) {
+            boolean found = false;
             for (Field field : fields) {
-                if (!field.fieldName.equalsIgnoreCase(where.singleExp1.field)){
-                    throw Error.FieldNotFoundException;
+                if (field.fieldName.equalsIgnoreCase(where.singleExp1.field)) {
+                    found = true;
+                    break;
                 }
+            }
+            if (!found) {
+                throw Error.FieldNotFoundException;
             }
         }
 
-        if (where.singleExp2 != null && where.singleExp2.field != null){
+        // 检查 singleExp2 字段
+        if (where.singleExp2 != null && where.singleExp2.field != null) {
+            boolean found = false;
             for (Field field : fields) {
-                if (!field.fieldName.equalsIgnoreCase(where.singleExp2.field)){
-                    throw Error.FieldNotFoundException;
+                if (field.fieldName.equalsIgnoreCase(where.singleExp2.field)) {
+                    found = true;
+                    break;
                 }
             }
+            if (!found) {
+                throw Error.FieldNotFoundException;
+            }
         }
+
         return true;
     }
+
 
 }
