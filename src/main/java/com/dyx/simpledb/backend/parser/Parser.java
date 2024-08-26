@@ -31,9 +31,9 @@ public class Parser {
 
         if (sql.toUpperCase().startsWith("BEGIN")) {
             return parseBegin(sql);
-        } else if (sql.equalsIgnoreCase("ABORT")) {
+        } else if (sql.equalsIgnoreCase("ABORT") || sql.equalsIgnoreCase("ABORT;")) {
             return parseAbort();
-        } else if (sql.equalsIgnoreCase("COMMIT")) {
+        } else if (sql.equalsIgnoreCase("COMMIT") || sql.equalsIgnoreCase("COMMIT;")) {
             return parseCommit();
         }
 
@@ -311,6 +311,11 @@ public class Parser {
     }
 
     private static Begin parseBegin(String sql) throws Exception {
+        sql = sql.trim();
+        if (sql.endsWith(";")){
+            sql = sql.substring(0,sql.length() - 1).trim();
+        }
+
         Tokenizer tokenizer = new Tokenizer(sql.getBytes());
         tokenizer.peek();
         tokenizer.pop();

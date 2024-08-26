@@ -8,3 +8,14 @@ spring:
     name: simple-sql-database
 server:
   port: 8081
+
+logging:
+  file:
+    name: logs/easydb.log
+    path: logs/
+    max-size: 10MB
+  level:
+    com.dyx.simpledb: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"

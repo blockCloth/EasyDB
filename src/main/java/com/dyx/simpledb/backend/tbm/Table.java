@@ -132,6 +132,7 @@ public class Table {
     }
 
     public int delete(long xid, DeleteObj deleteObj) throws Exception {
+        checkColumn(deleteObj.where);
         List<Long> uids = parseWhere(deleteObj.where, xid);
         int count = 0;
         for (Long uid : uids) {
@@ -143,6 +144,7 @@ public class Table {
     }
 
     public int update(long xid, UpdateObj updateObj) throws Exception {
+        checkColumn(updateObj.where);
         List<Long> uids = parseWhere(updateObj.where, xid);
         Field fd = null;
         for (Field f : fields) {
@@ -179,6 +181,7 @@ public class Table {
     }
 
     public String read(long xid, SelectObj read) throws Exception {
+        checkColumn(read.where);
         List<Long> uids = parseWhere(read.where, xid);
         List<Map<String, Object>> entries = new ArrayList<>();
         String[] fieldsToOutput;
@@ -583,4 +586,25 @@ public class Table {
         }
         return sb.toString();
     }
+
+    private boolean checkColumn(Where where) throws Exception {
+        if (where == null) return true;
+        if (where.singleExp1 != null && where.singleExp1.field != null){
+            for (Field field : fields) {
+                if (!field.fieldName.equalsIgnoreCase(where.singleExp1.field)){
+                    throw Error.FieldNotFoundException;
+                }
+            }
+        }
+
+        if (where.singleExp2 != null && where.singleExp2.field != null){
+            for (Field field : fields) {
+                if (!field.fieldName.equalsIgnoreCase(where.singleExp2.field)){
+                    throw Error.FieldNotFoundException;
+                }
+            }
+        }
+        return true;
+    }
+
 }

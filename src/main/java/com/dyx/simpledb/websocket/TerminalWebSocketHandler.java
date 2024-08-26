@@ -46,12 +46,13 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
         String clientIp = (String) session.getAttributes().get("clientIp");
         String sessionId = session.getId(); // 每个 WebSocket 会话的唯一标识符
 
+        log.info("User with IP: {}, session ID: {} executed SQL: {}", clientIp, sessionId, sql);
         // 获取当前 WebSocket 连接的专属线程池
         ExecutorService executorService = sessionExecutorMap.computeIfAbsent(sessionId, key -> Executors.newSingleThreadExecutor());
 
         executorService.submit(() -> {
             try {
-                if ("init".equalsIgnoreCase(sql.trim())) {
+                if ("init".equalsIgnoreCase(sql.trim()) || "init;".equalsIgnoreCase(sql.trim())) {
                     handleInitCommand(session, clientIp, sessionId);
                 } else {
                     UserSession userSession = userManager.getUserSession(clientIp);
@@ -142,8 +143,6 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
     }
 
     private void handleSqlCommand(WebSocketSession session, UserSession userSession, String sessionId, String sql) throws IOException {
-        String clientIp = (String) session.getAttributes().get("clientIp");
-        log.info("User with IP: {}, session ID: {} executed SQL: {}", clientIp, sessionId, sql);
         try {
             Executor executor = userSession.getExecutor(sessionId);
             byte[] execute = executor.execute(sql.getBytes());

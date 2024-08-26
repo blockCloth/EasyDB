@@ -10,7 +10,7 @@ public class Visibility {
         if (t.isolationLevel == IsolationLevel.READ_UNCOMMITTED){
             return false;
         }else if (t.isolationLevel == IsolationLevel.READ_COMMITTED){
-            return tm.isCommitted(xmax);
+            return false;
         }else if (t.isolationLevel == IsolationLevel.REPEATABLE_READ){
             return tm.isCommitted(xmax) && (xmax > t.xid || t.isInSnapshot(xmax));
         }else if (t.isolationLevel == IsolationLevel.SERIALIZABLE){
@@ -34,7 +34,6 @@ public class Visibility {
                 throw new IllegalArgumentException("Unknown isolation level: " + t.isolationLevel);
         }
     }
-
 
     // 读未提交，允许所有事务读取数据
     private static boolean readUnCommitted(TransactionManager tm, Transaction t, Entry e) {
