@@ -17,7 +17,7 @@ EasyDB 是一个用 Java 实现的简单数据库，部分原理参照自 MySQL�
 
 ### Spring Boot 构建
 
-项目采用 Spring Boot 进行构建，大大简化了项目的启动流程和配置管理。用户只需修改 `application.yml` 中的路径信息，即可快速启动项目。这种方式不仅提升了启动效率，也使得与前端的对接更加方便。
+项目采用 Spring Boot 进行构建，大大简化了项目的启动流程和配置管理。用户只需修改 `application.yml` 中的路径信息，即可快速启动项目。这种方式不仅提升了启动效率，也使得与前端的对接更加方便。部署成功之后页面输入：http://localhost:8081/index.html 即可
 
 ### WebSocket 实时通信
 
