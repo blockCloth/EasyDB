@@ -1,4 +1,4 @@
-package com.dyx.simpledb.common;
+package com.dyx.simpledb.websocket;
 
 import com.dyx.simpledb.backend.dm.DataManager;
 import com.dyx.simpledb.backend.server.Executor;

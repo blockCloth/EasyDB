@@ -1,4 +1,4 @@
-package com.dyx.simpledb.common;
+package com.dyx.simpledb.websocket;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;

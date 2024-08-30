@@ -7,8 +7,6 @@ import com.dyx.simpledb.backend.tbm.TableManager;
 import com.dyx.simpledb.backend.tm.TransactionManager;
 import com.dyx.simpledb.backend.vm.VersionManager;
 import com.dyx.simpledb.backend.vm.VersionManagerImpl;
-import com.dyx.simpledb.common.UserManager;
-import com.dyx.simpledb.common.UserSession;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;

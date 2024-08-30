@@ -37,7 +37,10 @@ public class Visibility {
 
     // 读未提交，允许所有事务读取数据
     private static boolean readUnCommitted(TransactionManager tm, Transaction t, Entry e) {
-        return true;
+        long xmax = e.getXmax();
+
+        // 检查数据是否被删除，如果未删除则可见
+        return xmax == 0;
     }
 
     private static boolean readCommitted(TransactionManager tm, Transaction t, Entry e) {

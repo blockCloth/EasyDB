@@ -211,13 +211,15 @@ public class VersionManagerImpl extends AbstractCache<Entry> implements VersionM
         }
         lock.unlock();
 
-        if (t.isolationLevel == IsolationLevel.SERIALIZABLE) {
-            globalLock.unlock();  // 释放全局锁
+        if (t.autoAborted){
+            if (t.isolationLevel == IsolationLevel.SERIALIZABLE) globalLock.unlock();  // 释放全局锁
+            return;
         }
-
-        if (t.autoAborted) return;
         lt.remove(xid);
         tm.abort(xid);
+
+        if (t.isolationLevel == IsolationLevel.SERIALIZABLE) globalLock.unlock();  // 释放全局锁
+
     }
 
     public void releaseEntry(Entry entry) {

@@ -7,7 +7,6 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.dyx.simpledb.backend.utils.Types;
-import com.dyx.simpledb.common.DatabaseState;
 import com.google.common.primitives.Bytes;
 
 import com.dyx.simpledb.backend.im.BPlusTree;
