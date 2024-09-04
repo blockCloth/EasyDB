@@ -82,8 +82,8 @@ cd EasyDB
 欲了解如何使用 EasyDB 的详细信息，请查阅以下文档：
 
 - [项目体验](http://db.blockcloth.cn/)
-- [使用指南](./guide/)
-- [项目文档](./docs/)
+- [使用指南](http://easydb.blockcloth.cn/document/)
+- [项目文档](http://easydb.blockcloth.cn/demo)
 
 ---
 
