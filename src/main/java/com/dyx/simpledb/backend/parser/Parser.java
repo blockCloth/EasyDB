@@ -8,9 +8,11 @@ import com.dyx.simpledb.backend.parser.statement.DeleteObj;
 import com.dyx.simpledb.backend.vm.IsolationLevel;
 import com.dyx.simpledb.common.Error;
 import net.sf.jsqlparser.JSQLParserException;
+import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
 import net.sf.jsqlparser.expression.operators.relational.ItemsListVisitorAdapter;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
+import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.statement.ShowStatement;
 import net.sf.jsqlparser.statement.Statement;
 import net.sf.jsqlparser.statement.create.table.ColumnDefinition;
@@ -24,6 +26,7 @@ import net.sf.jsqlparser.statement.select.Select;
 import net.sf.jsqlparser.statement.select.SelectExpressionItem;
 import net.sf.jsqlparser.statement.select.SelectVisitorAdapter;
 import net.sf.jsqlparser.statement.update.Update;
+import net.sf.jsqlparser.statement.update.UpdateSet;
 
 public class Parser {
     public static Object Parse(byte[] statement) throws Exception {
@@ -48,7 +51,7 @@ public class Parser {
             if (startIndex != -1 && endIndex != -1) {
                 result = message.substring(startIndex, endIndex);
             }
-            throw new RuntimeException("Invalid statement: " + result == null ?sql :result, e);
+            throw new RuntimeException("Invalid statement: " + result == null ? sql : result, e);
         }
 
         if (parsedStatement instanceof CreateTable) {
@@ -63,7 +66,7 @@ public class Parser {
             return parseDelete((Delete) parsedStatement);
         } else if (parsedStatement instanceof Drop) {
             return parseDrop((Drop) parsedStatement);
-        }else if (parsedStatement instanceof ShowStatement) {
+        } else if (parsedStatement instanceof ShowStatement) {
             return parseShow((ShowStatement) parsedStatement);
         } else {
             throw new RuntimeException("Unsupported statement: " + sql);
@@ -117,34 +120,54 @@ public class Parser {
     }
 
     private static Show parseShow(ShowStatement showStatement) throws Exception {
-       Show show = new Show();
+        Show show = new Show();
         String name = showStatement.getName();
-        if (name.equalsIgnoreCase("table")){
+        if (name.equalsIgnoreCase("table")) {
             show.isTable = true;
         }
         show.tableName = name;
-       return show;
+        return show;
     }
 
     private static UpdateObj parseUpdate(Update updateStmt) {
         UpdateObj updateObj = new UpdateObj();
+        List<String> fieldNames = new ArrayList<>();
+        List<String> fieldValues = new ArrayList<>();
+
         updateObj.tableName = updateStmt.getTable().getName();
-        updateObj.fieldName = updateStmt.getColumns().get(0).getColumnName();
-        updateObj.value = updateStmt.getExpressions().get(0).toString();
+        for (UpdateSet updateSet : updateStmt.getUpdateSets()) {
+            for (Column column : updateSet.getColumns()) {
+                // 添加字段名
+                fieldNames.add(column.getColumnName());
+            }
+            for (Expression expression : updateSet.getExpressions()) {
+                // 获取value值
+                fieldValues.add(stripQuotes(expression.toString()));
+            }
+        }
+        updateObj.fieldName = fieldNames.toArray(new String[0]);
+        updateObj.value = fieldValues.toArray(new String[0]);
+
+        // 解析 WHERE 子句
         if (updateStmt.getWhere() != null) {
             updateObj.where = parseWhere(updateStmt.getWhere().toString());
         }
+
         return updateObj;
     }
 
     private static DeleteObj parseDelete(Delete deleteStmt) {
         DeleteObj deleteObj = new DeleteObj();
+        // 获取表名
         deleteObj.tableName = deleteStmt.getTable().getName();
+        // 解析 WHERE 子句
         if (deleteStmt.getWhere() != null) {
             deleteObj.where = parseWhere(deleteStmt.getWhere().toString());
         }
+
         return deleteObj;
     }
+
 
     private static InsertObj parseInsert(Insert insertStmt) throws Exception {
         InsertObj insertObj = new InsertObj();
@@ -184,13 +207,15 @@ public class Parser {
 
     private static Where parseWhere(String whereClause) {
         Where where = new Where();
-        // 简单解析 where 条件
-        String[] parts = whereClause.split("\\s+");
+
+        // 使用正则表达式进行解析，支持空格和引号分隔
+        String[] parts = whereClause.split("\\s+(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)");
+
         if (parts.length >= 3) {
             SingleExpression exp1 = new SingleExpression();
             exp1.field = parts[0];
             exp1.compareOp = parts[1];
-            exp1.value = parts[2];
+            exp1.value = stripQuotes(parts[2]); // 去掉引号
             where.singleExp1 = exp1;
 
             if (parts.length > 3) {
@@ -207,7 +232,7 @@ public class Parser {
                     SingleExpression exp2 = new SingleExpression();
                     exp2.field = parts[4];
                     exp2.compareOp = parts[5];
-                    exp2.value = parts[6];
+                    exp2.value = stripQuotes(parts[6]); // 去掉引号
                     where.singleExp2 = exp2;
                 } else {
                     throw new IllegalArgumentException("Invalid or incomplete second condition in WHERE clause.");
@@ -225,6 +250,18 @@ public class Parser {
 
         return where;
     }
+
+    /**
+     * 去除单引号或双引号
+     */
+    private static String stripQuotes(String value) {
+        if ((value.startsWith("\"") && value.endsWith("\"")) ||
+                (value.startsWith("'") && value.endsWith("'"))) {
+            return value.substring(1, value.length() - 1); // 去掉首尾的引号
+        }
+        return value;
+    }
+
 
     private static void validateSingleExpression(SingleExpression exp) {
         // 检查比较操作符是否有效
@@ -296,7 +333,7 @@ public class Parser {
 
     private static DropObj parseDrop(Drop dropStmt) {
         DropObj dropObj = new DropObj();
-        if (dropStmt.getType().equalsIgnoreCase("table")){
+        if (dropStmt.getType().equalsIgnoreCase("table")) {
             dropObj.tableName = dropStmt.getName().getName();
         }
         return dropObj;
@@ -312,8 +349,8 @@ public class Parser {
 
     private static Begin parseBegin(String sql) throws Exception {
         sql = sql.trim();
-        if (sql.endsWith(";")){
-            sql = sql.substring(0,sql.length() - 1).trim();
+        if (sql.endsWith(";")) {
+            sql = sql.substring(0, sql.length() - 1).trim();
         }
 
         Tokenizer tokenizer = new Tokenizer(sql.getBytes());

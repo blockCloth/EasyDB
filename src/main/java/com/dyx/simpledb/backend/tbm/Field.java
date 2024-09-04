@@ -35,7 +35,7 @@ public class Field {
     // 增加非空约束
     boolean isNotNull;
     // 定义主键自增行为
-    AtomicInteger atomicInteger = new AtomicInteger(0);
+    AtomicInteger atomicInteger;
     // 唯一约束
     boolean isUnique;
     // 定义一个集合，存储元素
@@ -56,6 +56,8 @@ public class Field {
     public Field(long uid, Table tb) {
         this.uid = uid;
         this.tb = tb;
+        this.atomicInteger = new AtomicInteger(1);
+        this.uniqueValues = new HashSet<>();
     }
 
     public Field(Table tb, String fieldName, String fieldType, long index,
@@ -64,30 +66,43 @@ public class Field {
         this.fieldName = fieldName;
         this.fieldType = fieldType;
         this.index = index;
-        this.defaultValue = getDefaultValue(fieldType);
+        this.defaultValue = getDefaultValue();
         this.isAutoIncrement = isAutoIncrement;
         this.isNotNull = isNotNull;
         this.isUnique = isUnique;
-        if (isUnique) {
-            uniqueValues = new HashSet<>();
-        }
+        this.atomicInteger = new AtomicInteger(1);
+        this.uniqueValues = new HashSet<>();
         this.isPrimaryKey = isPrimaryKey;
     }
 
-    private Object getDefaultValue(String fieldType) {
+    private Object getDefaultValue() {
         Types.SupportedType type = Types.SupportedType.fromTypeName(fieldType);
         return type.getDefaultValue();
     }
 
     private Field parseSelf(byte[] raw) {
         int position = 0;
-        ParseStringRes res = Parser.parseString(raw);
+        // 解析约束条件
+        byte[] constraintRaw = Arrays.copyOf(raw, 4);
+        parseSelfConstraint(constraintRaw);
+        position += 4;
+
+        // 解析字段名称
+        ParseStringRes res = Parser.parseString(Arrays.copyOfRange(raw,position,raw.length));
         fieldName = res.str;
         position += res.next;
+
+        // 解析字段类型
         res = Parser.parseString(Arrays.copyOfRange(raw, position, raw.length));
         fieldType = res.str;
         position += res.next;
+        // 获取初始值
+        defaultValue = getDefaultValue();
+
+        // 解析索引 UID
         this.index = Parser.parseLong(Arrays.copyOfRange(raw, position, position + 8));
+
+        // 如果字段有索引，加载 B+ 树
         if (index != 0) {
             try {
                 bt = BPlusTree.load(index, ((TableManagerImpl) tb.tbm).dm);
@@ -96,6 +111,15 @@ public class Field {
             }
         }
         return this;
+    }
+
+    private void parseSelfConstraint(byte[] constraintRaw) {
+        int position = 0;
+        // 遍历所有布尔属性，解析每一个字节，并设置相应的字段
+        isPrimaryKey = (constraintRaw[position++] == 1);
+        isAutoIncrement = (constraintRaw[position++] == 1);
+        isNotNull = (constraintRaw[position++] == 1);
+        isUnique = (constraintRaw[position] == 1);
     }
 
     /**
@@ -127,10 +151,11 @@ public class Field {
     }
 
     private void persistSelf(long xid) throws Exception {
+        byte[] constraintRaw = Parser.constraintByte(isPrimaryKey,isAutoIncrement,isNotNull,isUnique);
         byte[] nameRaw = Parser.string2Byte(fieldName);
         byte[] typeRaw = Parser.string2Byte(fieldType);
         byte[] indexRaw = Parser.long2Byte(index);
-        this.uid = ((TableManagerImpl) tb.tbm).vm.insert(xid, Bytes.concat(nameRaw, typeRaw, indexRaw));
+        this.uid = ((TableManagerImpl) tb.tbm).vm.insert(xid, Bytes.concat(constraintRaw,nameRaw, typeRaw, indexRaw));
     }
 
     private static void typeCheck(String fieldType) throws Exception {

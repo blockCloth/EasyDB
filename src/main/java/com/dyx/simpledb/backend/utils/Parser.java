@@ -72,4 +72,11 @@ public class Parser {
         return res;
     }
 
+    public static byte[] constraintByte(boolean isPrimaryKey, boolean isAutoIncrement, boolean isNotNull, boolean isUnique) {
+        return Bytes.concat(
+                new byte[] {isPrimaryKey ? (byte) 1 : (byte) 0},
+                new byte[] {isAutoIncrement ? (byte) 1 : (byte) 0},
+                new byte[] {isNotNull ? (byte) 1 : (byte) 0},
+                new byte[] {isUnique ? (byte) 1 : (byte) 0});
+    }
 }

@@ -35,7 +35,7 @@ public class ParserTest {
 
     @Test
     public void update() throws Exception {
-        String sql = "UPDATE user SET name = 'lisi' WHERE id = 1;";
+        String sql = "UPDATE user SET name = 'lisi',email = 'zhangsan@qq.com' WHERE id = 1;";
         System.out.println(Parser.Parse(sql.getBytes()));
     }
 

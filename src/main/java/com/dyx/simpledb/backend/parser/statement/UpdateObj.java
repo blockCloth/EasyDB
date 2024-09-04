@@ -5,7 +5,7 @@ import lombok.ToString;
 @ToString
 public class UpdateObj {
     public String tableName;
-    public String fieldName;
-    public String value;
+    public String[] fieldName;
+    public String[] value;
     public Where where;
 }

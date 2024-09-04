@@ -172,7 +172,7 @@ public class TableManagerImpl implements TableManager {
             throw Error.TableNotFoundException;
         }
         int count = table.update(xid, updateObj);
-        return ("update" + count).getBytes();
+        return ("update " + count).getBytes();
     }
 
     @Override

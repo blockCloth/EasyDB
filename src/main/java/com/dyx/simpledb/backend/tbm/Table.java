@@ -27,8 +27,6 @@ public class Table {
     long nextUid;
     List<Field> fields = new ArrayList<>();
     public static final String GEN_CLUST_INDEX = "GEN_CLUST_INDEX";
-    // 存储需要自增的字段
-    static Set<String> autoIncrementFields = new HashSet<>();
     // 定义一个字段缓存，用于全表查询
     private Map<String, Field> fieldCache = new HashMap<>();
 
@@ -51,7 +49,7 @@ public class Table {
         // 获取非空字段名
         Set<String> notNullFields = new HashSet<>(Arrays.asList(create.notNull));
         // 获取自增字段名
-        autoIncrementFields = new HashSet<>(Arrays.asList(create.autoIncrement));
+        Set<String> autoIncrementFields = new HashSet<>(Arrays.asList(create.autoIncrement));
         // 获取唯一约束
         Set<String> uniqueFields = new HashSet<>(Arrays.asList(create.unique));
 
@@ -69,13 +67,13 @@ public class Table {
 
             // 检查自增字段的类型是否为整数
             if (isAutoIncrement) {
-                if (!fieldType.equalsIgnoreCase("int")) {
-                    throw new IllegalArgumentException("Field " + fieldName + " is set to auto-increment but its type is not 'int'. Auto-increment fields must be of type 'int'.");
+                if (!fieldType.equalsIgnoreCase("int") && !fieldType.equalsIgnoreCase("long")) {
+                    throw new IllegalArgumentException("Field " + fieldName + " is set to auto-increment but its type is not 'int' or 'long'. Auto-increment fields must be of type 'int' or 'long'.");
                 }
             }
 
             boolean indexed = false;
-            if (isPrimaryKey || (!hideIndex && isNotNull)) {
+            if (isPrimaryKey) {
                 indexed = true;
                 hideIndex = true;
             }
@@ -86,7 +84,7 @@ public class Table {
         if (!hideIndex) {
             // 创建自增的隐藏字段
             tb.fields.add(Field.createField(tb, xid, GEN_CLUST_INDEX, "int", true, true, true, true, false));
-            autoIncrementFields.add(GEN_CLUST_INDEX);
+            // autoIncrementFields.add(GEN_CLUST_INDEX);
         }
 
         return tb.persistSelf(xid);
@@ -146,17 +144,20 @@ public class Table {
     public int update(long xid, UpdateObj updateObj) throws Exception {
         checkColumn(updateObj.where);
         List<Long> uids = parseWhere(updateObj.where, xid);
-        Field fd = null;
-        for (Field f : fields) {
-            if (f.fieldName.equals(updateObj.fieldName)) {
-                fd = f;
-                break;
+
+        boolean fieldIsExist = false;
+        // 匹配需要修改的字段是否存在
+        for (Field field : fields) {
+            for (String fieldName : updateObj.fieldName) {
+                if (field.fieldName.equalsIgnoreCase(fieldName)){
+                    fieldIsExist = true;
+                }
             }
+
         }
-        if (fd == null) {
+        if (!fieldIsExist)
             throw Error.FieldNotFoundException;
-        }
-        Object value = fd.string2Value(updateObj.value);
+
         int count = 0;
         for (Long uid : uids) {
             byte[] raw = ((TableManagerImpl) tbm).vm.read(xid, uid);
@@ -165,7 +166,9 @@ public class Table {
             ((TableManagerImpl) tbm).vm.delete(xid, uid);
 
             Map<String, Object> entry = parseEntry(raw);
-            entry.put(fd.fieldName, value);
+            for (int i = 0; i < updateObj.fieldName.length; i++) {
+                entry.put(updateObj.fieldName[i],updateObj.value[i]);
+            }
             raw = entry2Raw(entry);
             long uuid = ((TableManagerImpl) tbm).vm.insert(xid, raw);
 
@@ -292,7 +295,7 @@ public class Table {
             for (Field field : fields) {
                 Object v = null;
                 // 判断是否存在自增字段
-                if (autoIncrementFields.contains(field.fieldName)) {
+                if (field.isAutoIncrement) {
                     if (valuesIndex < insertObj.values.length && insertObj.values[valuesIndex] != null && !insertObj.values[valuesIndex].isEmpty()) {
                         // 使用提供的值并更新自增器
                         v = field.string2Value(insertObj.values[valuesIndex]);
@@ -338,10 +341,10 @@ public class Table {
                     throw new IllegalArgumentException("Field " + field.fieldName + " must be unique.");
                 }
                 // 更新自增器
-                if (autoIncrementFields.contains(field.fieldName) && v != null && !v.toString().isEmpty()) {
+                if (field.isAutoIncrement && v != null && !v.toString().isEmpty()) {
                     field.atomicInteger.set(Integer.parseInt(v.toString()) + 1);
                 }
-            } else if (autoIncrementFields.contains(field.fieldName)) {
+            } else if (field.isPrimaryKey) {
                 v = field.string2Value(String.valueOf(field.atomicInteger.getAndIncrement()));
             } else {
                 v = field.defaultValue;
@@ -548,7 +551,7 @@ public class Table {
     }
 
     private String printEntries(List<Map<String, Object>> entries, String[] selectedFields) {
-        if (entries == null || entries.isEmpty()) return "";
+        // if (entries == null || entries.isEmpty()) return "";
         return PrintUtil.printTable(selectedFields, entries);
     }
 

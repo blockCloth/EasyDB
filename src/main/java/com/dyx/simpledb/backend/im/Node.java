@@ -242,7 +242,7 @@ public class Node {
         }
     }
 
-    private boolean insert(long uid, long key) {
+    public boolean insert(long uid, long key) {
         int noKeys = getRawNoKeys(raw);
         int kth = 0;
         while(kth < noKeys) {
