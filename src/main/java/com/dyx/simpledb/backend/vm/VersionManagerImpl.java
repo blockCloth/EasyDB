@@ -11,6 +11,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 import com.dyx.simpledb.backend.common.AbstractCache;
 import com.dyx.simpledb.backend.dm.DataManager;
+import com.dyx.simpledb.backend.tbm.Table;
 import com.dyx.simpledb.backend.tm.TransactionManager;
 import com.dyx.simpledb.backend.tm.TransactionManagerImpl;
 import com.dyx.simpledb.backend.utils.Panic;
@@ -93,6 +94,11 @@ public class VersionManagerImpl extends AbstractCache<Entry> implements VersionM
         dm.physicalDelete(uid);
 
         super.release(uid);
+    }
+
+    @Override
+    public Transaction getActiveTransaction(long xid) {
+        return activeTransaction.get(xid);
     }
 
     @Override
@@ -193,6 +199,11 @@ public class VersionManagerImpl extends AbstractCache<Entry> implements VersionM
         lt.remove(xid);
         tm.commit(xid);
 
+        // 通知所有关联的表进行索引提交
+        for (Table table : t.getModifiedTables()) {
+            table.commit(xid);
+        }
+
         if (t.isolationLevel == IsolationLevel.SERIALIZABLE && globalLock.tryLock()) {
             globalLock.unlock();  // 释放全局锁
         }
@@ -217,6 +228,11 @@ public class VersionManagerImpl extends AbstractCache<Entry> implements VersionM
         }
         lt.remove(xid);
         tm.abort(xid);
+
+        // 通知所有关联的表进行索引提交
+        for (Table table : t.getModifiedTables()) {
+            table.rollback(xid);
+        }
 
         if (t.isolationLevel == IsolationLevel.SERIALIZABLE) globalLock.unlock();  // 释放全局锁
 

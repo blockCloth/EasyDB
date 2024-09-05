@@ -22,6 +22,8 @@ public class Error {
     public static final Exception ConcurrentUpdateException = new RuntimeException("Concurrent modification error: Data has been modified by another transaction.");
     public static final Exception NullEntryException = new RuntimeException("Null value error: Attempted operation on a null entry.");
 
+    // IM
+    public static final Exception UniqueValuesNotRepeated = new RuntimeException("Unique values are not allowed to be repeated");
     // TBM
     public static final Exception InvalidFieldException = new RuntimeException("Invalid field type: The field type provided does not match the expected type.");
     public static final Exception FieldNotFoundException = new RuntimeException("Field not found: The specified field does not exist in the table.");

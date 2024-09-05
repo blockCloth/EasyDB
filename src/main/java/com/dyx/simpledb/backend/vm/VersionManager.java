@@ -17,4 +17,5 @@ public interface VersionManager {
     }
     void physicalDelete(long xid, Long uid) throws Exception;
 
+    Transaction getActiveTransaction(long xid);
 }

@@ -9,6 +9,7 @@ import com.dyx.simpledb.backend.tm.TransactionManager;
 public interface DataManager {
     DataItem read(long uid) throws Exception;
     long insert(long xid, byte[] data) throws Exception;
+    void physicalDelete(Long uid) throws Exception;
     void close();
 
     public static DataManager create(String path, long mem, TransactionManager tm) {
@@ -34,5 +35,4 @@ public interface DataManager {
         return dm;
     }
 
-    void physicalDelete(Long uid) throws Exception;
 }

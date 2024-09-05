@@ -1,7 +1,6 @@
 package com.dyx.simpledb.backend.tbm;
 
 import java.util.Arrays;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -38,8 +37,6 @@ public class Field {
     AtomicInteger atomicInteger;
     // 唯一约束
     boolean isUnique;
-    // 定义一个集合，存储元素
-    Set<Object> uniqueValues;
     boolean isPrimaryKey;
 
     public static Field loadField(Table tb, long uid) {
@@ -57,7 +54,6 @@ public class Field {
         this.uid = uid;
         this.tb = tb;
         this.atomicInteger = new AtomicInteger(1);
-        this.uniqueValues = new HashSet<>();
     }
 
     public Field(Table tb, String fieldName, String fieldType, long index,
@@ -71,7 +67,6 @@ public class Field {
         this.isNotNull = isNotNull;
         this.isUnique = isUnique;
         this.atomicInteger = new AtomicInteger(1);
-        this.uniqueValues = new HashSet<>();
         this.isPrimaryKey = isPrimaryKey;
     }
 
@@ -207,10 +202,6 @@ public class Field {
             // 如果枚举中不存在该类型，返回 null 或者其他默认值
             return null;
         }
-    }
-
-    public boolean valueExists(Object v) {
-        return uniqueValues.contains(v);
     }
 
     class ParseValueRes {

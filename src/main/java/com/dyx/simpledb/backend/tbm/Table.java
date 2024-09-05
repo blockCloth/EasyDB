@@ -4,8 +4,10 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 import cn.hutool.core.util.StrUtil;
+import com.dyx.simpledb.backend.im.UniqueIndex;
 import com.dyx.simpledb.backend.parser.statement.*;
 import com.dyx.simpledb.backend.utils.*;
+import com.dyx.simpledb.backend.vm.Transaction;
 import com.google.common.primitives.Bytes;
 
 import com.dyx.simpledb.backend.parser.statement.DeleteObj;
@@ -29,6 +31,8 @@ public class Table {
     public static final String GEN_CLUST_INDEX = "GEN_CLUST_INDEX";
     // 定义一个字段缓存，用于全表查询
     private Map<String, Field> fieldCache = new HashMap<>();
+    // 在 Table 类中定义一个哈希索引的存储结构
+    private Map<String, UniqueIndex> hasUniqueIndexes = new HashMap<>();
 
     public static Table loadTable(TableManager tbm, long uid) {
         byte[] raw = null;
@@ -78,13 +82,16 @@ public class Table {
                 hideIndex = true;
             }
 
+            // 如果字段是唯一的，创建哈希索引
+            if (isUnique) {
+                tb.hasUniqueIndexes.put(fieldName, new UniqueIndex());
+            }
             tb.fields.add(Field.createField(tb, xid, fieldName, fieldType, indexed, isAutoIncrement, isNotNull, isUnique, isPrimaryKey));
         }
 
         if (!hideIndex) {
             // 创建自增的隐藏字段
             tb.fields.add(Field.createField(tb, xid, GEN_CLUST_INDEX, "int", true, true, true, true, false));
-            // autoIncrementFields.add(GEN_CLUST_INDEX);
         }
 
         return tb.persistSelf(xid);
@@ -134,10 +141,27 @@ public class Table {
         List<Long> uids = parseWhere(deleteObj.where, xid);
         int count = 0;
         for (Long uid : uids) {
+            Map<String, Object> entry = parseEntry(((TableManagerImpl) tbm).vm.read(xid, uid));
+
+            // 删除哈希索引中的记录
+            for (Field field : fields) {
+                if (field.isUnique) {
+                    UniqueIndex index = hasUniqueIndexes.get(field.fieldName);
+                    if (index != null) {
+                        index.delete(field.fieldName, entry.get(field.fieldName),xid);
+                    }
+                }
+            }
+
+            // 删除数据
             if (((TableManagerImpl) tbm).vm.delete(xid, uid)) {
                 count++;
             }
         }
+
+        // 记录该表被修改
+        Transaction t = ((TableManagerImpl) tbm).vm.getActiveTransaction(xid);
+        t.addModifiedTable(this);
         return count;
     }
 
@@ -149,11 +173,10 @@ public class Table {
         // 匹配需要修改的字段是否存在
         for (Field field : fields) {
             for (String fieldName : updateObj.fieldName) {
-                if (field.fieldName.equalsIgnoreCase(fieldName)){
+                if (field.fieldName.equalsIgnoreCase(fieldName)) {
                     fieldIsExist = true;
                 }
             }
-
         }
         if (!fieldIsExist)
             throw Error.FieldNotFoundException;
@@ -166,8 +189,14 @@ public class Table {
             ((TableManagerImpl) tbm).vm.delete(xid, uid);
 
             Map<String, Object> entry = parseEntry(raw);
+            //先删除字段唯一索引的旧数据
+            for (Field field : fields) {
+                if (field.isUnique)
+                    hasUniqueIndexes.get(field.fieldName).delete(field.fieldName,entry.get(field.fieldName),xid);
+            }
+
             for (int i = 0; i < updateObj.fieldName.length; i++) {
-                entry.put(updateObj.fieldName[i],updateObj.value[i]);
+                entry.put(updateObj.fieldName[i], updateObj.value[i]);
             }
             raw = entry2Raw(entry);
             long uuid = ((TableManagerImpl) tbm).vm.insert(xid, raw);
@@ -178,8 +207,15 @@ public class Table {
                 if (field.isIndexed()) {
                     field.insert(entry.get(field.fieldName), uuid);
                 }
+                if (field.isUnique) { // 再次插入唯一索引的新数据
+                    hasUniqueIndexes.get(field.fieldName).insert(field.fieldName, entry.get(field.fieldName),xid);
+                }
             }
         }
+
+        // 记录该表被修改
+        Transaction t = ((TableManagerImpl) tbm).vm.getActiveTransaction(xid);
+        t.addModifiedTable(this);
         return count;
     }
 
@@ -254,9 +290,14 @@ public class Table {
             if (field.isIndexed()) {
                 field.insert(entry.get(field.fieldName), uid);
             }
+            // 添加唯一索引的内容
+            if (field.isUnique) {
+                hasUniqueIndexes.get(field.fieldName).insert(field.fieldName, entry.get(field.fieldName),xid);
+            }
         }
-        // 更新唯一值集合
-        updateUniqueValues(entry);
+        // 记录该表被修改
+        Transaction t = ((TableManagerImpl) tbm).vm.getActiveTransaction(xid);
+        t.addModifiedTable(this);
     }
 
     public void drop(long xid) throws Exception {
@@ -273,17 +314,14 @@ public class Table {
         // 4. 删除表的字段和索引元数据
         for (Field field : fields) {
             ((TableManagerImpl) tbm).vm.physicalDelete(xid, field.uid); // 物理删除字段元数据
+            // 删除对应的唯一索引
+            if (field.isUnique) {
+                hasUniqueIndexes.get(field.fieldName).remove(field.fieldName);
+                hasUniqueIndexes.remove(field.fieldName);
+            }
         }
         // 5. 删除表的自身元数据
         ((TableManagerImpl) tbm).vm.physicalDelete(xid, this.uid); // 物理删除表元数据
-    }
-
-    private void updateUniqueValues(Map<String, Object> entry) {
-        for (Field field : fields) {
-            if (field.isUnique && entry.containsKey(field.fieldName)) {
-                field.uniqueValues.add(entry.get(field.fieldName));
-            }
-        }
     }
 
     private Map<String, Object> string2Entry(InsertObj insertObj) {
@@ -315,7 +353,7 @@ public class Table {
                 entry.put(field.fieldName, v);
 
                 // 检查唯一性约束
-                if (field.isUnique && field.valueExists(v)) {
+                if (field.isUnique && hasUniqueIndexes.get(field.fieldName).search(field.fieldName,entry.get(field.fieldName))) {
                     throw new IllegalArgumentException("Field " + field.fieldName + " must be unique.");
                 }
 
@@ -337,7 +375,7 @@ public class Table {
             if (specifiedFields.contains(field.fieldName)) {
                 v = field.string2Value(removeQuotes(insertObj.values[valuesIndex++]));
                 // 检查唯一性约束
-                if (field.isUnique && field.valueExists(v)) {
+                if (field.isUnique && hasUniqueIndexes.get(field.fieldName).search(field.fieldName,entry.get(field.fieldName))) {
                     throw new IllegalArgumentException("Field " + field.fieldName + " must be unique.");
                 }
                 // 更新自增器
@@ -624,5 +662,19 @@ public class Table {
         return true;
     }
 
+    // 事务提交操作
+    public void commit(long xid) {
+        // 提交唯一索引
+        for (UniqueIndex index : hasUniqueIndexes.values()) {
+            index.commit(xid); // 提交唯一索引的更改
+        }
+    }
 
+    // 事务回滚操作
+    public void rollback(long xid) {
+        // 回滚唯一索引
+        for (UniqueIndex index : hasUniqueIndexes.values()) {
+            index.rollback(xid); // 回滚唯一索引的更改
+        }
+    }
 }
