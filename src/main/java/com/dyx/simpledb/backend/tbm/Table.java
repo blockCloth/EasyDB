@@ -148,11 +148,10 @@ public class Table {
                 if (field.isUnique) {
                     UniqueIndex index = hasUniqueIndexes.get(field.fieldName);
                     if (index != null) {
-                        index.delete(field.fieldName, entry.get(field.fieldName),xid);
+                        index.delete(field.fieldName, entry.get(field.fieldName), xid);
                     }
                 }
             }
-
             // 删除数据
             if (((TableManagerImpl) tbm).vm.delete(xid, uid)) {
                 count++;
@@ -186,29 +185,36 @@ public class Table {
             byte[] raw = ((TableManagerImpl) tbm).vm.read(xid, uid);
             if (raw == null) continue;
 
-            ((TableManagerImpl) tbm).vm.delete(xid, uid);
-
             Map<String, Object> entry = parseEntry(raw);
-            //先删除字段唯一索引的旧数据
+            // 删除旧值的唯一索引，只针对变更的字段
             for (Field field : fields) {
-                if (field.isUnique)
-                    hasUniqueIndexes.get(field.fieldName).delete(field.fieldName,entry.get(field.fieldName),xid);
+                for (int i = 0; i < updateObj.fieldName.length; i++) {
+                    String fieldName = updateObj.fieldName[i];
+                    Object newValue = updateObj.value[i];
+                    Object oldValue = entry.get(fieldName);
+                    // 仅删除发生变化的唯一索引
+                    if (!newValue.equals(oldValue) && field.isUnique && field.fieldName.equalsIgnoreCase(fieldName)) {
+                        hasUniqueIndexes.get(field.fieldName).update(field.fieldName, oldValue, newValue, xid);
+                    }
+                }
             }
 
+            // 更新字段的值
             for (int i = 0; i < updateObj.fieldName.length; i++) {
                 entry.put(updateObj.fieldName[i], updateObj.value[i]);
             }
+
+            // 写回更新后的记录
             raw = entry2Raw(entry);
-            long uuid = ((TableManagerImpl) tbm).vm.insert(xid, raw);
+            long newUid = ((TableManagerImpl) tbm).vm.insert(xid, raw);
 
+            // 删除旧记录
+            ((TableManagerImpl) tbm).vm.delete(xid, uid);
             count++;
-
+            // 插入新的唯一索引，仅针对变更的字段
             for (Field field : fields) {
                 if (field.isIndexed()) {
-                    field.insert(entry.get(field.fieldName), uuid);
-                }
-                if (field.isUnique) { // 再次插入唯一索引的新数据
-                    hasUniqueIndexes.get(field.fieldName).insert(field.fieldName, entry.get(field.fieldName),xid);
+                    field.insert(entry.get(field.fieldName), newUid);
                 }
             }
         }
@@ -216,6 +222,7 @@ public class Table {
         // 记录该表被修改
         Transaction t = ((TableManagerImpl) tbm).vm.getActiveTransaction(xid);
         t.addModifiedTable(this);
+
         return count;
     }
 
@@ -283,22 +290,42 @@ public class Table {
 
     public void insert(long xid, InsertObj insertObj) throws Exception {
         Map<String, Object> entry = string2Entry(insertObj);
+        Set<String> insertedUniqueFields = new HashSet<>();  // 用于记录成功插入的唯一索引字段
+
+        try {
+            // 在执行插入操作之前，确保所有唯一索引检查通过
+            for (Field field : fields) {
+                if (field.isUnique) {
+                    // 先检查唯一索引，确保没有冲突
+                    hasUniqueIndexes.get(field.fieldName).insert(field.fieldName, entry.get(field.fieldName), xid);
+                    // 如果插入成功，记录这个字段的唯一索引
+                    insertedUniqueFields.add(field.fieldName);
+                }
+            }
+        } catch (Exception e) {
+            // 如果发生异常，回滚所有唯一索引的插入操作
+            for (String fieldName : insertedUniqueFields) {
+                hasUniqueIndexes.get(fieldName).delete(fieldName, entry.get(fieldName), xid);
+            }
+            throw new RuntimeException("Insert failed," + e.getMessage(), e);
+        }
+
+        // 插入数据到存储中
         byte[] raw = entry2Raw(entry);
         long uid = ((TableManagerImpl) tbm).vm.insert(xid, raw);
 
+        // 将数据插入索引
         for (Field field : fields) {
             if (field.isIndexed()) {
                 field.insert(entry.get(field.fieldName), uid);
             }
-            // 添加唯一索引的内容
-            if (field.isUnique) {
-                hasUniqueIndexes.get(field.fieldName).insert(field.fieldName, entry.get(field.fieldName),xid);
-            }
         }
+
         // 记录该表被修改
         Transaction t = ((TableManagerImpl) tbm).vm.getActiveTransaction(xid);
         t.addModifiedTable(this);
     }
+
 
     public void drop(long xid) throws Exception {
         // 先删除表中所有数据
@@ -353,7 +380,7 @@ public class Table {
                 entry.put(field.fieldName, v);
 
                 // 检查唯一性约束
-                if (field.isUnique && hasUniqueIndexes.get(field.fieldName).search(field.fieldName,entry.get(field.fieldName))) {
+                if (field.isUnique && hasUniqueIndexes.get(field.fieldName).search(field.fieldName, entry.get(field.fieldName))) {
                     throw new IllegalArgumentException("Field " + field.fieldName + " must be unique.");
                 }
 
@@ -375,7 +402,7 @@ public class Table {
             if (specifiedFields.contains(field.fieldName)) {
                 v = field.string2Value(removeQuotes(insertObj.values[valuesIndex++]));
                 // 检查唯一性约束
-                if (field.isUnique && hasUniqueIndexes.get(field.fieldName).search(field.fieldName,entry.get(field.fieldName))) {
+                if (field.isUnique && hasUniqueIndexes.get(field.fieldName).search(field.fieldName, entry.get(field.fieldName))) {
                     throw new IllegalArgumentException("Field " + field.fieldName + " must be unique.");
                 }
                 // 更新自增器
@@ -663,7 +690,7 @@ public class Table {
     }
 
     // 事务提交操作
-    public void commit(long xid) {
+    public void commit(long xid) throws Exception {
         // 提交唯一索引
         for (UniqueIndex index : hasUniqueIndexes.values()) {
             index.commit(xid); // 提交唯一索引的更改

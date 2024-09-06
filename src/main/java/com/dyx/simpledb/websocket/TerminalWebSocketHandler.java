@@ -146,7 +146,10 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
             byte[] execute = executor.execute(sql.getBytes());
             String result = new String(execute).trim();
             session.sendMessage(new TextMessage(createMessage(result, "success")));
-        } catch (Exception e) {
+        } catch (NullPointerException e) {
+            e.printStackTrace();
+            session.sendMessage(new TextMessage(createMessage("System error, please contact the administrator", "error")));
+        }catch (Exception e) {
             e.printStackTrace();
             session.sendMessage(new TextMessage(createMessage(e.getMessage(), "error")));
         }
